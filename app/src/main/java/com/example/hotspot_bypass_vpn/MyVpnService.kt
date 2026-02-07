@@ -1,45 +1,90 @@
+package com.example.hotspot_bypass_vpn
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
+import androidx.core.app.NotificationCompat
+import android.content.pm.ServiceInfo
+import android.util.Log
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import kotlin.concurrent.thread
 
 class MyVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
+    private var vpnThread: Thread? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 1. Configure the VPN builder
-        val builder = Builder()
+        val proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
+        val proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
 
-        // setMtu: Maximum Transmission Unit (usually 1500)
-        builder.setMtu(1500)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1, createNotification())
+        }
 
-        // addAddress: Give the VPN a fake internal IP
-        builder.addAddress("10.0.0.2", 24)
+        // Establish VPN
+        vpnInterface = Builder()
+            .setMtu(1500)
+            .addAddress("10.0.0.2", 24)
+            .addRoute("0.0.0.0", 0)
+            .addDnsServer("8.8.8.8")
+            .setSession("HotspotBypass")
+            .establish()
 
-        // addRoute: 0.0.0.0/0 means "intercept ALL traffic"
-        builder.addRoute("0.0.0.0", 0)
-
-        builder.setSession("Hotspot Bypass VPN")
-
-        // 2. Establish the VPN interface
-        // This 'vpnInterface' is a file stream containing all network packets
-        vpnInterface = builder.establish()
-
-        // 3. Start the Tun2Socks logic
-        // You need to pass 'vpnInterface.fileDescriptor' to your native Tun2Socks library
-        // This is where you send the traffic to Phone A's IP (e.g., 192.168.49.1:8080)
-        startTun2Socks()
+        // START THE ENGINE
+        runVpnEngine(proxyIp, proxyPort)
 
         return START_STICKY
     }
 
-    private fun startTun2Socks() {
-        // This requires a native library (C/C++ or Go)
-        // Logic: Read packet from vpnInterface -> Wrap in SOCKS5 -> Send to Host IP
+    private fun runVpnEngine(ip: String, port: Int) {
+        vpnThread = thread {
+            val fd = vpnInterface?.fileDescriptor ?: return@thread
+            val input = FileInputStream(fd).channel
+            val output = FileOutputStream(fd).channel
+            val buffer = ByteBuffer.allocate(16384)
+
+            try {
+                Log.d("VPN_ENGINE", "VPN Engine is running and waiting for packets...")
+                while (true) {
+                    // Read a packet from the system
+                    val readLen = input.read(buffer)
+                    if (readLen > 0) {
+                        Log.d("VPN_ENGINE", "Captured a packet of size $readLen. Need Tun2Socks to forward this to $ip:$port")
+                        buffer.clear()
+                    }
+                    Thread.sleep(100) // Small delay to prevent CPU overheating
+                }
+            } catch (e: Exception) {
+                Log.e("VPN_ENGINE", "Error", e)
+            }
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val channelId = "vpn_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "VPN Service", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("VPN Active")
+            .setContentText("Checking for traffic...")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .build()
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        vpnThread?.interrupt()
         vpnInterface?.close()
+        super.onDestroy()
     }
 }

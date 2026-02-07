@@ -6,13 +6,13 @@ plugins {
 android {
     namespace = "com.example.hotspot_bypass_vpn"
     compileSdk {
-        version = release(36)
+        version = release(35)
     }
 
     defaultConfig {
         applicationId = "com.example.hotspot_bypass_vpn"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 

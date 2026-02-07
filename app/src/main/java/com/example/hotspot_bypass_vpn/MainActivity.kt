@@ -3,14 +3,17 @@ package com.example.hotspot_bypass_vpn
 import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.VpnService
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -29,107 +32,132 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     // UI Elements
     private lateinit var tvHostInfo: TextView
     private lateinit var tvStatusLog: TextView
+    private lateinit var etIp: EditText
+    private lateinit var etPort: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // 1. Initialize UI
+        // 1. Initialize UI Elements
         val btnStartHost = findViewById<Button>(R.id.btn_start_host)
+        val btnConnect = findViewById<Button>(R.id.btn_connect)
         tvHostInfo = findViewById(R.id.tv_host_info)
         tvStatusLog = findViewById(R.id.tv_status_log)
+        etIp = findViewById(R.id.et_host_ip)
+        etPort = findViewById(R.id.et_host_port)
 
         // 2. Initialize Wi-Fi Direct
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
 
-        // 3. Set up Intent Filter (What events we want to listen to)
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
 
-        // 4. Check Permissions immediately
         checkPermissions()
 
-        // 5. Button Logic
+        // 3. Logic for MODE A: HOST (Sharing)
         btnStartHost.setOnClickListener {
             startHost()
         }
+
+        // 4. Logic for MODE B: CLIENT (Connecting)
+        btnConnect.setOnClickListener {
+            val ip = etIp.text.toString()
+            val portStr = etPort.text.toString()
+
+            if (ip.isEmpty() || portStr.isEmpty()) {
+                Toast.makeText(this, "Please enter IP and Port", Toast.LENGTH_SHORT).show()
+            } else {
+                prepareVpn(ip, portStr.toInt())
+            }
+        }
     }
 
-    /** Register the BroadcastReceiver when the app is open */
+    // --- VPN CLIENT LOGIC ---
+
+    private fun prepareVpn(ip: String, port: Int) {
+        val intent = VpnService.prepare(this)
+        if (intent != null) {
+            // Asks user: "Do you trust this app to start a VPN?"
+            startActivityForResult(intent, 102)
+        } else {
+            // Already have permission
+            startVpnService(ip, port)
+        }
+    }
+
+    private fun startVpnService(ip: String, port: Int) {
+        val intent = Intent(this, MyVpnService::class.java).apply {
+            putExtra("PROXY_IP", ip)
+            putExtra("PROXY_PORT", port)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        log("VPN Client Starting... Connecting to $ip:$port")
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 102 && resultCode == RESULT_OK) {
+            val ip = etIp.text.toString()
+            val port = etPort.text.toString().toInt()
+            startVpnService(ip, port)
+        }
+    }
+
+    // --- WIFI DIRECT HOST LOGIC ---
+
+    private fun startHost() {
+        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { createNewGroup() }
+            override fun onFailure(reason: Int) { createNewGroup() }
+        })
+    }
+
+    private fun createNewGroup() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            log("Permission Error")
+            return
+        }
+        manager.createGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { log("Creating Group...") }
+            override fun onFailure(reason: Int) { log("Error: $reason") }
+        })
+    }
+
+    override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
+        if (info != null && info.groupFormed) {
+            val hostIp = info.groupOwnerAddress?.hostAddress ?: "192.168.49.1"
+            log("NETWORK ACTIVE. Host IP: $hostIp")
+            // Use this IP in Phone B
+        }
+    }
+
+    fun updateGroupInfo(group: WifiP2pGroup?) {
+        if (group != null && group.isGroupOwner) {
+            proxyServer.start() // Start the SOCKS5 server on Phone A
+            tvHostInfo.text = "SSID: ${group.networkName}\nPASS: ${group.passphrase}\nIP: 192.168.49.1\nPORT: 8080"
+            log("Proxy Running.")
+        }
+    }
+
+    // --- LIFECYCLE ---
+
     override fun onResume() {
         super.onResume()
         receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
         registerReceiver(receiver, intentFilter)
     }
 
-    /** Unregister when the app is minimized */
     override fun onPause() {
         super.onPause()
         unregisterReceiver(receiver)
-    }
-
-    /** Logic to Create the Group (Hotspot) */
-    private fun startHost() {
-        // 1. Always try to remove any existing group first to clear the "Busy" state
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                // Group removed, now create a new one
-                createNewGroup()
-            }
-
-            override fun onFailure(reason: Int) {
-                // Usually fails if no group existed, which is fine, proceed anyway
-                createNewGroup()
-            }
-        })
-    }
-
-    private fun createNewGroup() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            log("Permission denied.")
-            return
-        }
-
-        manager.createGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                log("Group creation started...")
-            }
-
-            override fun onFailure(reason: Int) {
-                log("Failed. Reason: $reason")
-                if (reason == 2) {
-                    log("Error 2 (BUSY): Ensure Wi-Fi & Location are ON and System Hotspot is OFF.")
-                }
-            }
-        })
-    }
-
-    /** Called by BroadcastReceiver when connection info is available */
-    override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
-        // This usually tells us if we are the Group Owner and what the IP is
-        if (info != null && info.groupFormed && info.isGroupOwner) {
-            log("HOST ACTIVE: IP is ${info.groupOwnerAddress.hostAddress}")
-            // We don't display password here; updateGroupInfo handles that
-        }
-    }
-
-    /** Called by BroadcastReceiver when Group info (SSID/Pass) is available */
-    fun updateGroupInfo(group: WifiP2pGroup?) {
-        if (group != null && group.isGroupOwner) {
-            val ssid = group.networkName
-            val password = group.passphrase
-
-            // Start the Proxy Server if it's not running
-            proxyServer.start()
-
-            val text = "SSID: $ssid\nPASS: $password\nIP: 192.168.49.1\nPORT: 8080"
-
-            tvHostInfo.text = text
-            log("Group Created. Proxy running on Port 8080.")
-        }
     }
 
     override fun onDestroy() {
@@ -147,11 +175,16 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
     }
 
     private fun log(message: String) {
-        val currentText = tvStatusLog.text.toString()
-        tvStatusLog.text = "$message\n$currentText"
+        runOnUiThread {
+            val currentText = tvStatusLog.text.toString()
+            tvStatusLog.text = "$message\n$currentText"
+        }
     }
 }

@@ -6,12 +6,13 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.InetSocketAddress
 import kotlin.concurrent.thread
 
 class ProxyServer {
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
-    private val PORT = 8080 // This is the port we will use
+    private val PORT = 8080
 
     fun start() {
         if (isRunning) return
@@ -19,63 +20,55 @@ class ProxyServer {
 
         thread {
             try {
-                // Bind to 0.0.0.0 so other devices (Phone B) can connect
-                serverSocket = ServerSocket(PORT)
-                Log.d("ProxyServer", "Server started on port $PORT")
+                // FORCE bind to 0.0.0.0 to listen on all interfaces (Hotspot + Mobile Data)
+                serverSocket = ServerSocket()
+                serverSocket?.reuseAddress = true
+                serverSocket?.bind(InetSocketAddress("0.0.0.0", PORT))
+
+                Log.d("ProxyServer", "SERVER STARTED on 0.0.0.0:$PORT")
 
                 while (isRunning) {
                     val client = serverSocket?.accept()
                     if (client != null) {
-                        // Handle every new connection in its own thread
+                        Log.d("ProxyServer", "NEW CLIENT CONNECTED: ${client.inetAddress.hostAddress}")
                         thread { handleClient(client) }
                     }
                 }
             } catch (e: Exception) {
-                Log.e("ProxyServer", "Error starting server", e)
+                Log.e("ProxyServer", "Critical Server Error", e)
             }
         }
     }
 
     fun stop() {
         isRunning = false
-        try {
-            serverSocket?.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        serverSocket?.close()
     }
 
     private fun handleClient(client: Socket) {
         try {
+            client.soTimeout = 10000 // 10 second timeout for handshake
             val input = client.getInputStream()
             val output = client.getOutputStream()
 
-            // --- STEP 1: SOCKS5 Handshake ---
-            // Client sends: [VER, NMETHODS, METHODS...]
-            // We just read 2 bytes to start
-            if (readByte(input) != 5) { // Ver must be 5
+            // --- SOCKS5 Handshake ---
+            val version = input.read()
+            if (version != 5) {
+                Log.e("ProxyServer", "Invalid Protocol: Received $version (Expected 5). Note: Manual Wi-Fi Proxy won't work because it uses HTTP, not SOCKS5.")
                 client.close()
                 return
             }
-            val nmethods = readByte(input)
-            // Skip the methods list
-            input.read(ByteArray(nmethods))
 
-            // Server responds: [VER, METHOD] -> [0x05, 0x00] (No Auth)
-            output.write(byteArrayOf(0x05, 0x00))
+            val nMethods = input.read()
+            input.read(ByteArray(nMethods)) // skip methods
+            output.write(byteArrayOf(0x05, 0x00)) // No Auth
             output.flush()
 
-            // --- STEP 2: Request Details ---
-            // Client sends: [VER, CMD, RSV, ATYP, DST.ADDR, DST.PORT]
-            val ver = readByte(input) // 5
-            val cmd = readByte(input) // 1 = Connect (TCP)
-            val rsv = readByte(input) // Reserved
-            val atyp = readByte(input) // Address Type
-
-            if (cmd != 1) { // We only support CONNECT (TCP) for now
-                client.close()
-                return
-            }
+            // --- Request ---
+            input.read() // skip ver
+            val cmd = input.read()
+            input.read() // skip rsv
+            val atyp = input.read()
 
             var targetHost = ""
             when (atyp) {
@@ -84,65 +77,49 @@ class ProxyServer {
                     input.read(ipBytes)
                     targetHost = InetAddress.getByAddress(ipBytes).hostAddress ?: ""
                 }
-                3 -> { // Domain Name
-                    val len = readByte(input)
+                3 -> { // Domain
+                    val len = input.read()
                     val domainBytes = ByteArray(len)
                     input.read(domainBytes)
                     targetHost = String(domainBytes)
                 }
-                4 -> { // IPv6 (Not supported in this basic example)
+                else -> {
                     client.close()
                     return
                 }
             }
 
-            // Read Port (2 bytes)
             val portBytes = ByteArray(2)
             input.read(portBytes)
             val targetPort = ((portBytes[0].toInt() and 0xFF) shl 8) or (portBytes[1].toInt() and 0xFF)
 
-            Log.d("ProxyServer", "Connecting to $targetHost:$targetPort")
+            Log.d("ProxyServer", "Forwarding request to: $targetHost:$targetPort")
 
-            // --- STEP 3: Connect to the Real Internet ---
-            // We create a socket to the target (e.g., Google.com)
             val targetSocket = Socket(targetHost, targetPort)
 
-            // Respond to Client: "OK, Connected"
-            // [VER, REP, RSV, ATYP, BND.ADDR, BND.PORT]
-            val response = ByteArray(10)
-            response[0] = 0x05
-            response[1] = 0x00 // Succeeded
-            response[3] = 0x01 // IPv4
+            // Success response
+            val response = byteArrayOf(0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0)
             output.write(response)
             output.flush()
 
-            // --- STEP 4: Data Pipe (Relay) ---
-            // We need two threads:
-            // 1. Client -> Target
-            // 2. Target -> Client
             thread { pipe(client.getInputStream(), targetSocket.getOutputStream()) }
-            thread { pipe(targetSocket.getInputStream(), client.getOutputStream()) }
+            pipe(targetSocket.getInputStream(), client.getOutputStream())
 
         } catch (e: Exception) {
-            // Log.e("ProxyServer", "Connection Error", e)
-            try { client.close() } catch (ex: Exception) {}
+            Log.e("ProxyServer", "Client Error: ${e.message}")
+        } finally {
+            client.close()
         }
     }
 
     private fun pipe(ins: InputStream, out: OutputStream) {
-        val buffer = ByteArray(4096)
-        var len: Int
+        val buffer = ByteArray(8192)
         try {
+            var len: Int
             while (ins.read(buffer).also { len = it } != -1) {
                 out.write(buffer, 0, len)
                 out.flush()
             }
-        } catch (e: Exception) {
-            // Connection closed
-        }
-    }
-
-    private fun readByte(ins: InputStream): Int {
-        return ins.read()
+        } catch (e: Exception) {}
     }
 }
