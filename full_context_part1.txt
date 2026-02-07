@@ -1,0 +1,730 @@
+
+============================================================
+FILE: build.gradle.kts
+============================================================
+
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.android) apply false
+}
+
+============================================================
+FILE: settings.gradle.kts
+============================================================
+
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "Hotspot-Bypass-VPN"
+include(":app")
+
+
+============================================================
+FILE: app\build.gradle.kts
+============================================================
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+}
+
+android {
+    namespace = "com.example.hotspot_bypass_vpn"
+    compileSdk {
+        version = release(36)
+    }
+
+    defaultConfig {
+        applicationId = "com.example.hotspot_bypass_vpn"
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+    kotlinOptions {
+        jvmTarget = "11"
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.activity)
+    implementation(libs.androidx.constraintlayout)
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+}
+
+============================================================
+FILE: app\src\main\AndroidManifest.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Basic Internet -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <!-- Wi-Fi Direct / Local Hotspot -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Required for Android 13+ to find nearby devices -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="tiramisu" />
+
+    <!-- Location (Required for Wi-Fi on Android 12 and below) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Required to keep the proxy running in background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HotspotBypassVPN">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".MyVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\MainActivity.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.wifi.p2p.WifiP2pGroup
+import android.net.wifi.p2p.WifiP2pInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.Build
+import android.os.Bundle
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+
+class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener {
+
+    private val proxyServer = ProxyServer()
+
+    // Wifi P2P Variables
+    private lateinit var manager: WifiP2pManager
+    private lateinit var channel: WifiP2pManager.Channel
+    private lateinit var receiver: BroadcastReceiver
+    private val intentFilter = IntentFilter()
+
+    // UI Elements
+    private lateinit var tvHostInfo: TextView
+    private lateinit var tvStatusLog: TextView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // 1. Initialize UI
+        val btnStartHost = findViewById<Button>(R.id.btn_start_host)
+        tvHostInfo = findViewById(R.id.tv_host_info)
+        tvStatusLog = findViewById(R.id.tv_status_log)
+
+        // 2. Initialize Wi-Fi Direct
+        manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        channel = manager.initialize(this, mainLooper, null)
+
+        // 3. Set up Intent Filter (What events we want to listen to)
+        intentFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+        intentFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
+        intentFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+        intentFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+
+        // 4. Check Permissions immediately
+        checkPermissions()
+
+        // 5. Button Logic
+        btnStartHost.setOnClickListener {
+            startHost()
+        }
+    }
+
+    /** Register the BroadcastReceiver when the app is open */
+    override fun onResume() {
+        super.onResume()
+        receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
+        registerReceiver(receiver, intentFilter)
+    }
+
+    /** Unregister when the app is minimized */
+    override fun onPause() {
+        super.onPause()
+        unregisterReceiver(receiver)
+    }
+
+    /** Logic to Create the Group (Hotspot) */
+    private fun startHost() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            log("Permission denied. Cannot start host.")
+            return
+        }
+
+        // Creates a persistent legacy group
+        manager.createGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                log("Group creation started successfully.")
+                tvHostInfo.text = "Starting... Check Wi-Fi Settings."
+            }
+
+            override fun onFailure(reason: Int) {
+                log("Failed to create group. Reason Code: $reason")
+                if (reason == 2) log("Hint: Turn on Wi-Fi/Location first.")
+            }
+        })
+    }
+
+    /** Called by BroadcastReceiver when connection info is available */
+    override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
+        // This usually tells us if we are the Group Owner and what the IP is
+        if (info != null && info.groupFormed && info.isGroupOwner) {
+            log("HOST ACTIVE: IP is ${info.groupOwnerAddress.hostAddress}")
+            // We don't display password here; updateGroupInfo handles that
+        }
+    }
+
+    /** Called by BroadcastReceiver when Group info (SSID/Pass) is available */
+    fun updateGroupInfo(group: WifiP2pGroup?) {
+        if (group != null && group.isGroupOwner) {
+            val ssid = group.networkName
+            val password = group.passphrase
+
+            // Start the Proxy Server if it's not running
+            proxyServer.start()
+
+            val text = "SSID: $ssid\nPASS: $password\nIP: 192.168.49.1\nPORT: 8080"
+
+            tvHostInfo.text = text
+            log("Group Created. Proxy running on Port 8080.")
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        proxyServer.stop()
+        manager.removeGroup(channel, null)
+    }
+
+    private fun checkPermissions() {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.CHANGE_WIFI_STATE,
+            Manifest.permission.ACCESS_WIFI_STATE
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
+    }
+
+    private fun log(message: String) {
+        val currentText = tvStatusLog.text.toString()
+        tvStatusLog.text = "$message\n$currentText"
+    }
+}
+
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\MyVpnService.kt
+============================================================
+
+import android.content.Intent
+import android.net.VpnService
+import android.os.ParcelFileDescriptor
+
+class MyVpnService : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 1. Configure the VPN builder
+        val builder = Builder()
+
+        // setMtu: Maximum Transmission Unit (usually 1500)
+        builder.setMtu(1500)
+
+        // addAddress: Give the VPN a fake internal IP
+        builder.addAddress("10.0.0.2", 24)
+
+        // addRoute: 0.0.0.0/0 means "intercept ALL traffic"
+        builder.addRoute("0.0.0.0", 0)
+
+        builder.setSession("Hotspot Bypass VPN")
+
+        // 2. Establish the VPN interface
+        // This 'vpnInterface' is a file stream containing all network packets
+        vpnInterface = builder.establish()
+
+        // 3. Start the Tun2Socks logic
+        // You need to pass 'vpnInterface.fileDescriptor' to your native Tun2Socks library
+        // This is where you send the traffic to Phone A's IP (e.g., 192.168.49.1:8080)
+        startTun2Socks()
+
+        return START_STICKY
+    }
+
+    private fun startTun2Socks() {
+        // This requires a native library (C/C++ or Go)
+        // Logic: Read packet from vpnInterface -> Wrap in SOCKS5 -> Send to Host IP
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        vpnInterface?.close()
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\ProxyServer.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.util.Log
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import kotlin.concurrent.thread
+
+class ProxyServer {
+    private var serverSocket: ServerSocket? = null
+    private var isRunning = false
+    private val PORT = 8080 // This is the port we will use
+
+    fun start() {
+        if (isRunning) return
+        isRunning = true
+
+        thread {
+            try {
+                // Bind to 0.0.0.0 so other devices (Phone B) can connect
+                serverSocket = ServerSocket(PORT)
+                Log.d("ProxyServer", "Server started on port $PORT")
+
+                while (isRunning) {
+                    val client = serverSocket?.accept()
+                    if (client != null) {
+                        // Handle every new connection in its own thread
+                        thread { handleClient(client) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ProxyServer", "Error starting server", e)
+            }
+        }
+    }
+
+    fun stop() {
+        isRunning = false
+        try {
+            serverSocket?.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun handleClient(client: Socket) {
+        try {
+            val input = client.getInputStream()
+            val output = client.getOutputStream()
+
+            // --- STEP 1: SOCKS5 Handshake ---
+            // Client sends: [VER, NMETHODS, METHODS...]
+            // We just read 2 bytes to start
+            if (readByte(input) != 5) { // Ver must be 5
+                client.close()
+                return
+            }
+            val nmethods = readByte(input)
+            // Skip the methods list
+            input.read(ByteArray(nmethods))
+
+            // Server responds: [VER, METHOD] -> [0x05, 0x00] (No Auth)
+            output.write(byteArrayOf(0x05, 0x00))
+            output.flush()
+
+            // --- STEP 2: Request Details ---
+            // Client sends: [VER, CMD, RSV, ATYP, DST.ADDR, DST.PORT]
+            val ver = readByte(input) // 5
+            val cmd = readByte(input) // 1 = Connect (TCP)
+            val rsv = readByte(input) // Reserved
+            val atyp = readByte(input) // Address Type
+
+            if (cmd != 1) { // We only support CONNECT (TCP) for now
+                client.close()
+                return
+            }
+
+            var targetHost = ""
+            when (atyp) {
+                1 -> { // IPv4
+                    val ipBytes = ByteArray(4)
+                    input.read(ipBytes)
+                    targetHost = InetAddress.getByAddress(ipBytes).hostAddress ?: ""
+                }
+                3 -> { // Domain Name
+                    val len = readByte(input)
+                    val domainBytes = ByteArray(len)
+                    input.read(domainBytes)
+                    targetHost = String(domainBytes)
+                }
+                4 -> { // IPv6 (Not supported in this basic example)
+                    client.close()
+                    return
+                }
+            }
+
+            // Read Port (2 bytes)
+            val portBytes = ByteArray(2)
+            input.read(portBytes)
+            val targetPort = ((portBytes[0].toInt() and 0xFF) shl 8) or (portBytes[1].toInt() and 0xFF)
+
+            Log.d("ProxyServer", "Connecting to $targetHost:$targetPort")
+
+            // --- STEP 3: Connect to the Real Internet ---
+            // We create a socket to the target (e.g., Google.com)
+            val targetSocket = Socket(targetHost, targetPort)
+
+            // Respond to Client: "OK, Connected"
+            // [VER, REP, RSV, ATYP, BND.ADDR, BND.PORT]
+            val response = ByteArray(10)
+            response[0] = 0x05
+            response[1] = 0x00 // Succeeded
+            response[3] = 0x01 // IPv4
+            output.write(response)
+            output.flush()
+
+            // --- STEP 4: Data Pipe (Relay) ---
+            // We need two threads:
+            // 1. Client -> Target
+            // 2. Target -> Client
+            thread { pipe(client.getInputStream(), targetSocket.getOutputStream()) }
+            thread { pipe(targetSocket.getInputStream(), client.getOutputStream()) }
+
+        } catch (e: Exception) {
+            // Log.e("ProxyServer", "Connection Error", e)
+            try { client.close() } catch (ex: Exception) {}
+        }
+    }
+
+    private fun pipe(ins: InputStream, out: OutputStream) {
+        val buffer = ByteArray(4096)
+        var len: Int
+        try {
+            while (ins.read(buffer).also { len = it } != -1) {
+                out.write(buffer, 0, len)
+                out.flush()
+            }
+        } catch (e: Exception) {
+            // Connection closed
+        }
+    }
+
+    private fun readByte(ins: InputStream): Int {
+        return ins.read()
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\WiFiDirectBroadcastReceiver.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.NetworkInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
+
+class WiFiDirectBroadcastReceiver(
+    private val manager: WifiP2pManager,
+    private val channel: WifiP2pManager.Channel,
+    private val activity: MainActivity
+) : BroadcastReceiver() {
+
+    override fun onReceive(context: Context, intent: Intent) {
+        when (intent.action) {
+            WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
+                val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
+                // Optional: Notify activity if Wifi P2P is disabled
+                if (state != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
+                    // Wi-Fi Direct is OFF
+                }
+            }
+            WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
+                // We don't need this for the Host, but if you scan for peers,
+                // you would check permissions here too.
+            }
+            WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
+                val networkInfo = intent.getParcelableExtra<NetworkInfo>(WifiP2pManager.EXTRA_NETWORK_INFO)
+
+                if (networkInfo?.isConnected == true) {
+                    // --- PERMISSION CHECK START ---
+                    // We must check if we have permission before asking for IP/Password
+
+                    // 1. Check for Fine Location (Required for all versions)
+                    if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+                        return // Exit if permission is missing
+                    }
+
+                    // 2. Check for Nearby Devices (Required for Android 13+)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.NEARBY_WIFI_DEVICES)
+                            != PackageManager.PERMISSION_GRANTED) {
+                            return // Exit if permission is missing
+                        }
+                    }
+                    // --- PERMISSION CHECK END ---
+
+                    // If we passed the checks, it is safe to call these:
+                    manager.requestConnectionInfo(channel, activity)
+
+                    manager.requestGroupInfo(channel) { group ->
+                        // Send the group info (Password/SSID) back to MainActivity
+                        activity.updateGroupInfo(group)
+                    }
+                }
+            }
+            WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
+                // Respond to this device's wifi state changing
+            }
+        }
+    }
+}
+
+============================================================
+FILE: app\src\main\res\layout\activity_main.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    tools:context=".MainActivity">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <!-- APP TITLE -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hotspot Bypass VPN"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="24dp"/>
+
+            <!-- SECTION 1: HOST (SHARE INTERNET) -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp"
+                android:layout_marginBottom="24dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MODE A: HOST (Share Internet)"
+                        android:textStyle="bold"
+                        android:textColor="@color/black"
+                        android:layout_marginBottom="8dp"/>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="1. Turn on Mobile Data.\n2. Click Start to create a Wi-Fi Group."
+                        android:textSize="12sp"
+                        android:layout_marginBottom="12dp"/>
+
+                    <Button
+                        android:id="@+id/btn_start_host"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Start Sharing"
+                        android:backgroundTint="#2196F3"/>
+
+                    <!-- This text will update with SSID/Pass when you click Start -->
+                    <TextView
+                        android:id="@+id/tv_host_info"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Status: Stopped"
+                        android:background="#EEE"
+                        android:padding="8dp"
+                        android:layout_marginTop="8dp"
+                        android:fontFamily="monospace"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- SECTION 2: CLIENT (CONNECT) -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MODE B: CLIENT (Connect)"
+                        android:textStyle="bold"
+                        android:textColor="@color/black"
+                        android:layout_marginBottom="8dp"/>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="1. Connect to the Host's Wi-Fi manually.\n2. Enter IP Address from Host screen below.\n3. Click Connect to start VPN."
+                        android:textSize="12sp"
+                        android:layout_marginBottom="12dp"/>
+
+                    <EditText
+                        android:id="@+id/et_host_ip"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Host IP (e.g., 192.168.49.1)"
+                        android:inputType="number|numberDecimal"/>
+
+                    <EditText
+                        android:id="@+id/et_host_port"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Port (e.g., 8080)"
+                        android:inputType="number"
+                        android:text="8080"/>
+
+                    <Button
+                        android:id="@+id/btn_connect"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Connect &amp; Start VPN"
+                        android:backgroundTint="#4CAF50"
+                        android:layout_marginTop="8dp"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- DEBUG LOGS -->
+            <TextView
+                android:id="@+id/tv_status_log"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Logs will appear here..."
+                android:layout_marginTop="24dp"
+                android:padding="8dp"
+                android:textColor="#555"/>
+
+        </LinearLayout>
+    </ScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>
