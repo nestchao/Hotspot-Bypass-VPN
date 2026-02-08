@@ -5,9 +5,7 @@ plugins {
 
 android {
     namespace = "com.example.hotspot_bypass_vpn"
-    compileSdk {
-        version = release(35)
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.hotspot_bypass_vpn"
@@ -17,6 +15,10 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
+        }
     }
 
     buildTypes {
@@ -46,4 +48,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    // Alternative: Use OkHttp for SOCKS proxy support
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

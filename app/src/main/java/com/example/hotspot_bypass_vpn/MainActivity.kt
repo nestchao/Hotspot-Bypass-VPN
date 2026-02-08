@@ -18,6 +18,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import kotlin.concurrent.thread
+import android.provider.Settings
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener {
 
@@ -38,6 +41,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        val btnDebug = findViewById<Button>(R.id.btn_debug)
 
         // 1. Initialize UI Elements
         val btnStartHost = findViewById<Button>(R.id.btn_start_host)
@@ -63,6 +67,11 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             startHost()
         }
 
+        // Add this listener
+        btnDebug.setOnClickListener {
+            runInternetPingTest()
+        }
+
         // 4. Logic for MODE B: CLIENT (Connecting)
         btnConnect.setOnClickListener {
             val ip = etIp.text.toString()
@@ -70,9 +79,16 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
             if (ip.isEmpty() || portStr.isEmpty()) {
                 Toast.makeText(this, "Please enter IP and Port", Toast.LENGTH_SHORT).show()
-            } else {
-                prepareVpn(ip, portStr.toInt())
+                return@setOnClickListener
             }
+
+            val port = portStr.toIntOrNull() ?: 8080
+
+            // Test connectivity first
+            testConnectivity(ip, port)
+
+            // Then start VPN
+            prepareVpn(ip, port)
         }
     }
 
@@ -149,15 +165,40 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     // --- LIFECYCLE ---
 
+    private val logReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val message = intent?.getStringExtra("message") ?: ""
+            log(message)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
         registerReceiver(receiver, intentFilter)
+
+        // FIX: Use ContextCompat to support API 24 while using modern security flags
+        ContextCompat.registerReceiver(
+            this,
+            logReceiver,
+            IntentFilter("VPN_LOG"),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onPause() {
         super.onPause()
-        unregisterReceiver(receiver)
+        try {
+            unregisterReceiver(receiver)
+        } catch (e: IllegalArgumentException) {
+            // Receiver was not registered
+        }
+
+        try {
+            unregisterReceiver(logReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Receiver was not registered
+        }
     }
 
     override fun onDestroy() {
@@ -185,6 +226,105 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         runOnUiThread {
             val currentText = tvStatusLog.text.toString()
             tvStatusLog.text = "$message\n$currentText"
+        }
+    }
+
+    private fun testConnectivity(ip: String, port: Int) {
+        thread {
+            try {
+                DebugUtils.log("Starting connectivity test...")
+
+                // Test 1: Basic socket connection
+                val canConnect = DebugUtils.testProxyConnection(ip, port)
+
+                runOnUiThread {
+                    if (canConnect) {
+                        Toast.makeText(this, "✓ Can connect to proxy", Toast.LENGTH_SHORT).show()
+                        log("Connectivity test PASSED")
+                    } else {
+                        Toast.makeText(this, "✗ Cannot connect to proxy", Toast.LENGTH_SHORT).show()
+                        log("Connectivity test FAILED")
+                    }
+                }
+
+                // Test 2: Test internet via proxy (optional)
+                if (canConnect) {
+                    testInternetViaProxy(ip, port)
+                }
+
+            } catch (e: Exception) {
+                runOnUiThread {
+                    log("Test error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun testInternetViaProxy(ip: String, port: Int) {
+        thread {
+            try {
+                DebugUtils.log("Testing internet via proxy...")
+
+                // This is a simple test - you'd need to implement proper SOCKS5 client
+                // For now, just log that we're trying
+                log("Attempting to route traffic through proxy $ip:$port")
+
+            } catch (e: Exception) {
+                log("Proxy routing test error: ${e.message}")
+            }
+        }
+    }
+
+    private fun checkVpnPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                true
+            } else {
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                startActivity(intent)
+                false
+            }
+        } else {
+            true
+        }
+    }
+
+    private fun runInternetPingTest() {
+        log("--- Starting Connectivity Test ---")
+
+        thread {
+            // Test 1: TCP "Ping" to Google DNS (8.8.8.8)
+            // We use a Socket instead of ICMP Ping because SOCKS5 proxies
+            // usually don't support ICMP.
+            try {
+                val host = "8.8.8.8"
+                val port = 53
+                val timeout = 5000
+                val startTime = System.currentTimeMillis()
+
+                val socket = java.net.Socket()
+                socket.connect(java.net.InetSocketAddress(host, port), timeout)
+                val endTime = System.currentTimeMillis()
+                socket.close()
+
+                log("✓ Internet Reachable: Connected to $host in ${endTime - startTime}ms")
+            } catch (e: Exception) {
+                log("✗ Internet Unreachable: ${e.message}")
+            }
+
+            // Test 2: DNS Resolution
+            // This tests if your handleDnsOverTcp function in MyVpnService is working
+            try {
+                log("Testing DNS resolution (google.com)...")
+                val dnsStart = System.currentTimeMillis()
+                val address = java.net.InetAddress.getByName("google.com")
+                val dnsEnd = System.currentTimeMillis()
+
+                log("✓ DNS Success: google.com -> ${address.hostAddress} (${dnsEnd - dnsStart}ms)")
+            } catch (e: Exception) {
+                log("✗ DNS Failed: ${e.message}")
+                log("Tip: Check if Phone A has Mobile Data enabled.")
+            }
         }
     }
 }

@@ -144,6 +144,13 @@
                 android:padding="8dp"
                 android:textColor="#555"/>
 
+            <Button
+                android:id="@+id/btn_debug"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Debug Test"
+                android:backgroundTint="#FF9800" />
+
         </LinearLayout>
     </ScrollView>
 </androidx.constraintlayout.widget.ConstraintLayout>
