@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -68,9 +69,14 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         btnStartHost.setOnClickListener {
             if (checkHardwareStatus()) {
-                startHost()
+                val rgBand = findViewById<RadioGroup>(R.id.rg_band)
+                // 1 = 2.4GHz, 2 = 5GHz (Matching WifiP2pConfig constants)
+                val selectedBand = if (rgBand.checkedRadioButtonId == R.id.rb_5ghz) 2 else 1
+
+                startHost(selectedBand)
             }
         }
+
 
         btnStopHost.setOnClickListener {
             stopHost()
@@ -147,6 +153,18 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun startHost(band: Int) {
+        val intent = Intent(this, HostService::class.java).apply {
+            putExtra("WIFI_BAND", band)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        log("Host Service starting (${if(band == 2) "5GHz" else "2.4GHz"})...")
     }
 
     // --- HOST LOGIC ---

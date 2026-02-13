@@ -336,6 +336,9 @@ import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.*
 import androidx.core.app.NotificationCompat
+import android.net.wifi.p2p.WifiP2pConfig
+import android.util.Log
+import android.os.Build
 
 class HostService : Service() {
 
@@ -345,6 +348,8 @@ class HostService : Service() {
 
     private lateinit var p2pManager: WifiP2pManager
     private lateinit var p2pChannel: WifiP2pManager.Channel
+
+    private var preferredBand = 1
 
     override fun onCreate() {
         super.onCreate()
@@ -358,18 +363,19 @@ class HostService : Service() {
             return START_NOT_STICKY
         }
 
+        // Get the band from intent (default to 1 which is 2.4GHz)
+        preferredBand = intent?.getIntExtra("WIFI_BAND", 1) ?: 1
+        Log.d("HostService", "⚡ Starting with band preference: $preferredBand (${if(preferredBand == 1) "2.4GHz" else "5GHz"})")
+
         startForeground(2, createNotification("Initializing Wi-Fi Group..."))
         acquireLocks()
 
-        // Start Proxy
         if (proxyServer == null) {
             proxyServer = ProxyServer()
             proxyServer?.start()
         }
 
-        // Start Wi-Fi Direct Group inside the Service
         setupWifiDirectGroup()
-
         return START_STICKY
     }
 
@@ -377,23 +383,132 @@ class HostService : Service() {
     private fun setupWifiDirectGroup() {
         // Remove existing group first to ensure a clean start
         p2pManager.removeGroup(p2pChannel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { createGroup() }
-            override fun onFailure(reason: Int) { createGroup() }
+            override fun onSuccess() {
+                Log.d("HostService", "✓ Old group removed, creating new one...")
+                Thread.sleep(500) // Small delay to ensure clean state
+                createGroup()
+            }
+            override fun onFailure(reason: Int) {
+                Log.d("HostService", "No existing group to remove (reason: $reason), creating new one...")
+                createGroup()
+            }
         })
     }
 
     @SuppressLint("MissingPermission")
     private fun createGroup() {
-        p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                updateNotification("Sharing Active (SOCKS5: 8080)")
-                // Broadcast to UI if it's open
-                sendBroadcast(Intent("HOST_STATS_UPDATE").putExtra("status", "Running"))
+        val config = WifiP2pConfig()
+        config.groupOwnerIntent = 15 // Force this phone to be the boss
+
+        // 1. Logic for Android 10 (API 29) and above
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                // Method 1: Try to set groupOwnerBand (preferred method)
+                try {
+                    val bandField = config.javaClass.getField("groupOwnerBand")
+                    bandField.set(config, preferredBand)
+                    Log.d("HostService", "✓ Set groupOwnerBand to $preferredBand (${if(preferredBand == 1) "2.4GHz" else "5GHz"})")
+                } catch (e: Exception) {
+                    Log.w("HostService", "groupOwnerBand field not found: ${e.message}")
+                }
+
+                // Method 2: Try to set network name with band hint
+                try {
+                    val netNameField = config.javaClass.getDeclaredField("mNetworkName")
+                    netNameField.isAccessible = true
+                    val bandSuffix = if (preferredBand == 1) "_24G" else "_5G"
+                    netNameField.set(config, "DIRECT-${bandSuffix}")
+                    Log.d("HostService", "✓ Set network name with band hint: $bandSuffix")
+                } catch (e: Exception) {
+                    Log.w("HostService", "mNetworkName field not available: ${e.message}")
+                }
+
+                // Method 3: ONLY set frequency if we're on 2.4GHz (more reliable)
+                if (preferredBand == 1) {
+                    try {
+                        val freqField = config.javaClass.getDeclaredField("groupOwnerFrequency")
+                        freqField.isAccessible = true
+                        // Use a different 2.4GHz channel (try channel 6 = 2437MHz)
+                        // Some devices work better with channel 6 or 11
+                        freqField.set(config, 2437) // 2.4GHz Channel 6
+                        Log.d("HostService", "✓ Forced Frequency to 2437MHz (Channel 6, 2.4GHz)")
+                    } catch (e: Exception) {
+                        Log.w("HostService", "Could not set frequency: ${e.message}")
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e("HostService", "Band configuration error: ${e.message}")
             }
-            override fun onFailure(reason: Int) {
-                updateNotification("Error: Failed to create Wi-Fi Group ($reason)")
+
+            // Call the API 29+ version of createGroup
+            p2pManager.createGroup(p2pChannel, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d("HostService", "✓ Group creation SUCCESS, checking actual frequency...")
+                    // Wait a moment for the group to fully initialize
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        checkActualGroupFrequency()
+                    }, 1000)
+                }
+                override fun onFailure(reason: Int) {
+                    Log.e("HostService", "✗ Group creation FAILED with reason: $reason")
+                    val errorMsg = when(reason) {
+                        0 -> "Internal error"
+                        1 -> "P2P unsupported"
+                        2 -> "Busy"
+                        else -> "Unknown error ($reason)"
+                    }
+                    updateNotification("Failed: $errorMsg")
+                }
+            })
+
+        } else {
+            // 2. Logic for Android 7.0 to Android 9.0 (API 24-28)
+            // These versions DO NOT support setting a band via code.
+            Log.w("HostService", "⚠ Android < 10: Band selection not supported")
+            p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    updateNotification("Sharing Active (Auto Band)")
+                }
+                override fun onFailure(reason: Int) {
+                    updateNotification("Failed to start group (Legacy): $reason")
+                }
+            })
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun checkActualGroupFrequency() {
+        p2pManager.requestGroupInfo(p2pChannel) { group ->
+            if (group != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val freq = group.frequency
+                    val band = if (freq > 4000) "5GHz" else "2.4GHz"
+                    val bandEmoji = if (freq > 4000) "⚠️" else "✓"
+
+                    Log.d("HostService", "═══════════════════════════════")
+                    Log.d("HostService", "$bandEmoji ACTUAL OPERATING BAND: $band")
+                    Log.d("HostService", "   Frequency: $freq MHz")
+                    Log.d("HostService", "   Expected: ${if(preferredBand == 1) "2.4GHz" else "5GHz"}")
+                    Log.d("HostService", "═══════════════════════════════")
+
+                    if ((preferredBand == 1 && freq > 4000) || (preferredBand == 2 && freq < 4000)) {
+                        Log.w("HostService", "⚠️ WARNING: Band mismatch detected!")
+                        updateNotification("⚠️ Active: $band (Expected: ${if(preferredBand == 1) "2.4GHz" else "5GHz"})")
+                    } else {
+                        updateNotification("✓ Sharing Active: $band")
+                    }
+                } else {
+                    updateNotification("Sharing Active")
+                }
             }
-        })
+        }
+    }
+
+    private fun handleGroupSuccess() {
+        val bandName = if (preferredBand == 2 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "5GHz" else "2.4GHz/Auto"
+        updateNotification("Sharing Active ($bandName)")
+        sendBroadcast(Intent("HOST_STATS_UPDATE").putExtra("status", "Running"))
     }
 
     private fun stopGroupAndService() {
@@ -477,6 +592,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -528,9 +644,14 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         btnStartHost.setOnClickListener {
             if (checkHardwareStatus()) {
-                startHost()
+                val rgBand = findViewById<RadioGroup>(R.id.rg_band)
+                // 1 = 2.4GHz, 2 = 5GHz (Matching WifiP2pConfig constants)
+                val selectedBand = if (rgBand.checkedRadioButtonId == R.id.rb_5ghz) 2 else 1
+
+                startHost(selectedBand)
             }
         }
+
 
         btnStopHost.setOnClickListener {
             stopHost()
@@ -607,6 +728,18 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun startHost(band: Int) {
+        val intent = Intent(this, HostService::class.java).apply {
+            putExtra("WIFI_BAND", band)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        log("Host Service starting (${if(band == 2) "5GHz" else "2.4GHz"})...")
     }
 
     // --- HOST LOGIC ---
@@ -2796,6 +2929,40 @@ FILE: app\src\main\res\layout\activity_main.xml
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Wi-Fi Band:"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:layout_marginTop="8dp"/>
+
+                    <RadioGroup
+                        android:id="@+id/rg_band"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+                        <RadioButton
+                            android:id="@+id/rb_24ghz"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="2.4 GHz"
+                            android:checked="true" />
+                        <RadioButton
+                            android:id="@+id/rb_5ghz"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:text="5 GHz" />
+                    </RadioGroup>
+
+                    <TextView
+                        android:id="@+id/textView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="btn_start_host " />
 
                     <TextView
                         android:layout_width="wrap_content"
