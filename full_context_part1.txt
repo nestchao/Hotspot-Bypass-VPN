@@ -123,6 +123,7 @@ FILE: app\src\main\AndroidManifest.xml
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -175,6 +176,7 @@ FILE: app\src\main\AndroidManifest.xml
             android:name=".HostService"
             android:enabled="true"
             android:exported="false"
+            android:process=":proxy"
             android:foregroundServiceType="specialUse" />
     </application>
 
@@ -326,17 +328,14 @@ FILE: app\src\main\java\com\example\hotspot_bypass_vpn\HostService.kt
 
 package com.example.hotspot_bypass_vpn
 
+import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
-import android.os.Build
-import android.os.IBinder
-import android.os.PowerManager
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.*
 import androidx.core.app.NotificationCompat
-import android.app.AlarmManager
-import android.app.PendingIntent
-import android.os.SystemClock
 
 class HostService : Service() {
 
@@ -344,84 +343,109 @@ class HostService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+    private lateinit var p2pManager: WifiP2pManager
+    private lateinit var p2pChannel: WifiP2pManager.Channel
 
-        if (action == "STOP") {
-            stopSelf()
+    override fun onCreate() {
+        super.onCreate()
+        p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        p2pChannel = p2pManager.initialize(this, mainLooper, null)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP") {
+            stopGroupAndService()
             return START_NOT_STICKY
         }
 
-        startForegroundService()
+        startForeground(2, createNotification("Initializing Wi-Fi Group..."))
         acquireLocks()
 
+        // Start Proxy
         if (proxyServer == null) {
             proxyServer = ProxyServer()
             proxyServer?.start()
         }
 
-        // START_STICKY tells Android: "If you kill this process for memory,
-        // recreate the service as soon as possible."
+        // Start Wi-Fi Direct Group inside the Service
+        setupWifiDirectGroup()
+
         return START_STICKY
     }
 
-    private fun startForegroundService() {
+    @SuppressLint("MissingPermission")
+    private fun setupWifiDirectGroup() {
+        // Remove existing group first to ensure a clean start
+        p2pManager.removeGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { createGroup() }
+            override fun onFailure(reason: Int) { createGroup() }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createGroup() {
+        p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                updateNotification("Sharing Active (SOCKS5: 8080)")
+                // Broadcast to UI if it's open
+                sendBroadcast(Intent("HOST_STATS_UPDATE").putExtra("status", "Running"))
+            }
+            override fun onFailure(reason: Int) {
+                updateNotification("Error: Failed to create Wi-Fi Group ($reason)")
+            }
+        })
+    }
+
+    private fun stopGroupAndService() {
+        p2pManager.removeGroup(p2pChannel, null)
+        proxyServer?.stop()
+        stopSelf()
+    }
+
+    private fun createNotification(content: String): Notification {
         val channelId = "host_service_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Host Proxy Service", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, "Host Service", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
         val stopIntent = Intent(this, HostService::class.java).apply { action = "STOP" }
         val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Bypass VPN: Host Mode Active")
-            .setContentText("Keeping proxy alive while screen is off...")
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Hotspot Bypass: Host Active")
+            .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_menu_share)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Sharing", stopPendingIntent)
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
             .build()
-
-        startForeground(2, notification)
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // This is called when the user swipes the app out of the Recents list
-        val restartServiceIntent = Intent(applicationContext, this.javaClass)
-        restartServiceIntent.setPackage(packageName)
-
-        val restartServicePendingIntent = PendingIntent.getService(
-            applicationContext,
-            1,
-            restartServiceIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        // Schedule the service to restart in 1 second
-        val alarmService = applicationContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmService.set(
-            AlarmManager.ELAPSED_REALTIME,
-            SystemClock.elapsedRealtime() + 1000,
-            restartServicePendingIntent
-        )
-
-        super.onTaskRemoved(rootIntent)
+    private fun updateNotification(content: String) {
+        val notification = createNotification(content)
+        getSystemService(NotificationManager::class.java).notify(2, notification)
     }
 
     private fun acquireLocks() {
-        // Keep CPU running
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BypassVPN::HostWakeLock")
         wakeLock?.acquire()
 
-        // Keep Wi-Fi at high performance
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BypassVPN::WifiLock")
         wifiLock?.acquire()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // This keeps the service alive when swiped away
+        val restartServiceIntent = Intent(applicationContext, this.javaClass).also { it.setPackage(packageName) }
+        val restartServicePendingIntent = PendingIntent.getService(this, 1, restartServiceIntent, PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE)
+        val alarmService = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmService.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 1000, restartServicePendingIntent)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
-        proxyServer?.stop()
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
         super.onDestroy()
@@ -529,9 +553,12 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         }
 
         btnStopClient.setOnClickListener {
-            log("Stopping VPN Service...")
-            val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
-            stopService(intent)
+            log("Requesting VPN Stop...")
+            val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+                action = "com.example.hotspot_bypass_vpn.STOP" // Match the string in the Service
+            }
+            // We start it as a service with the STOP action
+            startService(intent)
         }
 
         btnDebug.setOnClickListener {
@@ -585,18 +612,13 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     // --- HOST LOGIC ---
 
     private fun startHost() {
-        // Instead of just creating group, we start the service
         val intent = Intent(this, HostService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
-
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { createNewGroup() }
-            override fun onFailure(reason: Int) { createNewGroup() }
-        })
+        log("Host Service starting in dedicated process...")
     }
 
     private fun createNewGroup() {
@@ -611,21 +633,10 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     }
 
     private fun stopHost() {
-        log("Stopping Host...")
-        // Stop the service
-        stopService(Intent(this, HostService::class.java))
-
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                log("✓ Wi-Fi Group removed")
-                tvHostInfo.text = "Status: Stopped"
-            }
-            override fun onFailure(reason: Int) {
-                log("✗ Failed to remove group: $reason")
-            }
-        })
+        val intent = Intent(this, HostService::class.java).apply { action = "STOP" }
+        startService(intent)
+        log("Host Service stopping...")
     }
-
     // --- CLIENT LOGIC ---
 
     private fun prepareVpn(ip: String, port: Int) {
@@ -2167,6 +2178,7 @@ package com.example.hotspot_bypass_vpn
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -2182,7 +2194,16 @@ class MyVpnServiceTun2Socks : VpnService() {
     private var proxyIp = ""
     private var proxyPort = 0
 
+    companion object {
+        const val ACTION_STOP = "com.example.hotspot_bypass_vpn.STOP"
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            DebugUtils.log("Stop Action Received via Intent")
+            shutdownService()
+            return START_NOT_STICKY
+        }
         proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
         proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
 
@@ -2198,6 +2219,27 @@ class MyVpnServiceTun2Socks : VpnService() {
         }
 
         return START_STICKY
+    }
+
+    private fun shutdownService() {
+        isRunning = false
+
+        // 1. Close the interface first to drop the system VPN route
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+        } catch (e: Exception) {}
+
+        // 2. Stop the native engine
+        try {
+            Engine.stop()
+        } catch (e: Exception) {}
+
+        // 3. Remove foreground status and stop
+        stopForeground(true)
+        stopSelf()
+
+        DebugUtils.log("Service shutdown sequence complete")
     }
 
     private fun startVpnWithTun2Socks() {
@@ -2270,7 +2312,7 @@ class MyVpnServiceTun2Socks : VpnService() {
 
             // Keep the thread alive while VPN is running
             while (isRunning) {
-                Thread.sleep(1000)
+                Thread.sleep(500)
             }
 
         } catch (e: Exception) {
@@ -2313,33 +2355,53 @@ class MyVpnServiceTun2Socks : VpnService() {
     }
 
     override fun onDestroy() {
-        DebugUtils.log("Stopping VPN service...")
+        DebugUtils.log("CRITICAL: Executing Stop Sequence...")
         isRunning = false
 
-        try {
-            DebugUtils.log("Stopping tun2socks engine...")
-            Engine.stop() // Change Tun2socks.stop to Engine.stop
-            DebugUtils.log("✓ tun2socks stopped")
-        } catch (e: Exception) {
-            DebugUtils.error("Error stopping tun2socks", e)
-        }
-
+        // 1. FORCIBLY close the VPN Interface first
+        // This tells the Android OS to immediately remove the VPN routes
         try {
             vpnInterface?.close()
             vpnInterface = null
-            DebugUtils.log("✓ VPN interface closed")
+            DebugUtils.log("✓ VPN Interface closed (Routing removed)")
         } catch (e: Exception) {
-            DebugUtils.error("Error closing VPN interface", e)
+            DebugUtils.error("Error closing interface", e)
         }
 
-        stopForeground(true) // Removes the notification
-        stopSelf()           // Ensures the service is killed
+        // 2. Stop the tun2socks Engine
+        try {
+            Engine.stop()
+            DebugUtils.log("✓ tun2socks engine stopped")
+        } catch (e: Exception) {
+            DebugUtils.error("Error stopping engine", e)
+        }
+
+        // 3. Clean up notifications
+        stopForeground(true)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(1)
+
+        DebugUtils.log("VPN Service fully destroyed")
+
+        // 4. Final safety: Kill the process if it's stuck
+        // (Optional: Only use if the above doesn't work)
+        // android.os.Process.killProcess(android.os.Process.myPid())
 
         super.onDestroy()
+
+        thread {
+            Thread.sleep(1000)
+            if (!isRunning) {
+                // If the app is only used for VPN, you can kill the process
+                // to ensure the SOCKS engine is dead.
+                // android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
     }
 
+
     override fun onRevoke() {
-        DebugUtils.log("VPN permission revoked by user")
+        DebugUtils.log("VPN Permission revoked by system")
         stopSelf()
         super.onRevoke()
     }

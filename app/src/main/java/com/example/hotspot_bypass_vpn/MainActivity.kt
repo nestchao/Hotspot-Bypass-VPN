@@ -93,9 +93,12 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         }
 
         btnStopClient.setOnClickListener {
-            log("Stopping VPN Service...")
-            val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
-            stopService(intent)
+            log("Requesting VPN Stop...")
+            val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+                action = "com.example.hotspot_bypass_vpn.STOP" // Match the string in the Service
+            }
+            // We start it as a service with the STOP action
+            startService(intent)
         }
 
         btnDebug.setOnClickListener {
