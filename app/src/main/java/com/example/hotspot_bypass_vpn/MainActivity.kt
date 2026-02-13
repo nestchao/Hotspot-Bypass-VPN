@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -68,9 +69,14 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         btnStartHost.setOnClickListener {
             if (checkHardwareStatus()) {
-                startHost()
+                val rgBand = findViewById<RadioGroup>(R.id.rg_band)
+                // 1 = 2.4GHz, 2 = 5GHz (Matching WifiP2pConfig constants)
+                val selectedBand = if (rgBand.checkedRadioButtonId == R.id.rb_5ghz) 2 else 1
+
+                startHost(selectedBand)
             }
         }
+
 
         btnStopHost.setOnClickListener {
             stopHost()
@@ -93,7 +99,12 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         }
 
         btnStopClient.setOnClickListener {
-            stopVpnService()
+            log("Requesting VPN Stop...")
+            val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+                action = "com.example.hotspot_bypass_vpn.STOP" // Match the string in the Service
+            }
+            // We start it as a service with the STOP action
+            startService(intent)
         }
 
         btnDebug.setOnClickListener {
@@ -144,13 +155,28 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             .show()
     }
 
+    private fun startHost(band: Int) {
+        val intent = Intent(this, HostService::class.java).apply {
+            putExtra("WIFI_BAND", band)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        log("Host Service starting (${if(band == 2) "5GHz" else "2.4GHz"})...")
+    }
+
     // --- HOST LOGIC ---
 
     private fun startHost() {
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { createNewGroup() }
-            override fun onFailure(reason: Int) { createNewGroup() }
-        })
+        val intent = Intent(this, HostService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        log("Host Service starting in dedicated process...")
     }
 
     private fun createNewGroup() {
@@ -165,19 +191,10 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     }
 
     private fun stopHost() {
-        log("Stopping Host...")
-        proxyServer.stop()
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                log("✓ Wi-Fi Group removed")
-                tvHostInfo.text = "Status: Stopped"
-            }
-            override fun onFailure(reason: Int) {
-                log("✗ Failed to remove group: $reason")
-            }
-        })
+        val intent = Intent(this, HostService::class.java).apply { action = "STOP" }
+        startService(intent)
+        log("Host Service stopping...")
     }
-
     // --- CLIENT LOGIC ---
 
     private fun prepareVpn(ip: String, port: Int) {
@@ -220,9 +237,10 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     fun updateGroupInfo(group: WifiP2pGroup?) {
         if (group != null && group.isGroupOwner) {
-            proxyServer.start()
+            // We don't call proxyServer.start() here anymore,
+            // the HostService handles it.
             tvHostInfo.text = "SSID: ${group.networkName}\nPASS: ${group.passphrase}\nIP: 192.168.49.1\nPORT: 8080"
-            log("Proxy Running (SOCKS5)")
+            log("Proxy Service running in background")
         }
     }
 

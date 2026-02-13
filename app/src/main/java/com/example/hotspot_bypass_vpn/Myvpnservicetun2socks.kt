@@ -2,6 +2,7 @@ package com.example.hotspot_bypass_vpn
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -17,7 +18,16 @@ class MyVpnServiceTun2Socks : VpnService() {
     private var proxyIp = ""
     private var proxyPort = 0
 
+    companion object {
+        const val ACTION_STOP = "com.example.hotspot_bypass_vpn.STOP"
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            DebugUtils.log("Stop Action Received via Intent")
+            shutdownService()
+            return START_NOT_STICKY
+        }
         proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
         proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
 
@@ -33,6 +43,27 @@ class MyVpnServiceTun2Socks : VpnService() {
         }
 
         return START_STICKY
+    }
+
+    private fun shutdownService() {
+        isRunning = false
+
+        // 1. Close the interface first to drop the system VPN route
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+        } catch (e: Exception) {}
+
+        // 2. Stop the native engine
+        try {
+            Engine.stop()
+        } catch (e: Exception) {}
+
+        // 3. Remove foreground status and stop
+        stopForeground(true)
+        stopSelf()
+
+        DebugUtils.log("Service shutdown sequence complete")
     }
 
     private fun startVpnWithTun2Socks() {
@@ -105,7 +136,7 @@ class MyVpnServiceTun2Socks : VpnService() {
 
             // Keep the thread alive while VPN is running
             while (isRunning) {
-                Thread.sleep(1000)
+                Thread.sleep(500)
             }
 
         } catch (e: Exception) {
@@ -148,30 +179,53 @@ class MyVpnServiceTun2Socks : VpnService() {
     }
 
     override fun onDestroy() {
-        DebugUtils.log("Stopping VPN service...")
+        DebugUtils.log("CRITICAL: Executing Stop Sequence...")
         isRunning = false
 
-        try {
-            DebugUtils.log("Stopping tun2socks engine...")
-            Engine.stop() // Change Tun2socks.stop to Engine.stop
-            DebugUtils.log("✓ tun2socks stopped")
-        } catch (e: Exception) {
-            DebugUtils.error("Error stopping tun2socks", e)
-        }
-
+        // 1. FORCIBLY close the VPN Interface first
+        // This tells the Android OS to immediately remove the VPN routes
         try {
             vpnInterface?.close()
             vpnInterface = null
-            DebugUtils.log("✓ VPN interface closed")
+            DebugUtils.log("✓ VPN Interface closed (Routing removed)")
         } catch (e: Exception) {
-            DebugUtils.error("Error closing VPN interface", e)
+            DebugUtils.error("Error closing interface", e)
         }
 
+        // 2. Stop the tun2socks Engine
+        try {
+            Engine.stop()
+            DebugUtils.log("✓ tun2socks engine stopped")
+        } catch (e: Exception) {
+            DebugUtils.error("Error stopping engine", e)
+        }
+
+        // 3. Clean up notifications
+        stopForeground(true)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(1)
+
+        DebugUtils.log("VPN Service fully destroyed")
+
+        // 4. Final safety: Kill the process if it's stuck
+        // (Optional: Only use if the above doesn't work)
+        // android.os.Process.killProcess(android.os.Process.myPid())
+
         super.onDestroy()
+
+        thread {
+            Thread.sleep(1000)
+            if (!isRunning) {
+                // If the app is only used for VPN, you can kill the process
+                // to ensure the SOCKS engine is dead.
+                // android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
     }
 
+
     override fun onRevoke() {
-        DebugUtils.log("VPN permission revoked by user")
+        DebugUtils.log("VPN Permission revoked by system")
         stopSelf()
         super.onRevoke()
     }
