@@ -1,16 +1,13 @@
 package com.example.hotspot_bypass_vpn
 
+import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
-import android.os.Build
-import android.os.IBinder
-import android.os.PowerManager
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.*
 import androidx.core.app.NotificationCompat
-import android.app.AlarmManager
-import android.app.PendingIntent
-import android.os.SystemClock
 
 class HostService : Service() {
 
@@ -18,84 +15,109 @@ class HostService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+    private lateinit var p2pManager: WifiP2pManager
+    private lateinit var p2pChannel: WifiP2pManager.Channel
 
-        if (action == "STOP") {
-            stopSelf()
+    override fun onCreate() {
+        super.onCreate()
+        p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        p2pChannel = p2pManager.initialize(this, mainLooper, null)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP") {
+            stopGroupAndService()
             return START_NOT_STICKY
         }
 
-        startForegroundService()
+        startForeground(2, createNotification("Initializing Wi-Fi Group..."))
         acquireLocks()
 
+        // Start Proxy
         if (proxyServer == null) {
             proxyServer = ProxyServer()
             proxyServer?.start()
         }
 
-        // START_STICKY tells Android: "If you kill this process for memory,
-        // recreate the service as soon as possible."
+        // Start Wi-Fi Direct Group inside the Service
+        setupWifiDirectGroup()
+
         return START_STICKY
     }
 
-    private fun startForegroundService() {
+    @SuppressLint("MissingPermission")
+    private fun setupWifiDirectGroup() {
+        // Remove existing group first to ensure a clean start
+        p2pManager.removeGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { createGroup() }
+            override fun onFailure(reason: Int) { createGroup() }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createGroup() {
+        p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                updateNotification("Sharing Active (SOCKS5: 8080)")
+                // Broadcast to UI if it's open
+                sendBroadcast(Intent("HOST_STATS_UPDATE").putExtra("status", "Running"))
+            }
+            override fun onFailure(reason: Int) {
+                updateNotification("Error: Failed to create Wi-Fi Group ($reason)")
+            }
+        })
+    }
+
+    private fun stopGroupAndService() {
+        p2pManager.removeGroup(p2pChannel, null)
+        proxyServer?.stop()
+        stopSelf()
+    }
+
+    private fun createNotification(content: String): Notification {
         val channelId = "host_service_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Host Proxy Service", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, "Host Service", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
         val stopIntent = Intent(this, HostService::class.java).apply { action = "STOP" }
         val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Bypass VPN: Host Mode Active")
-            .setContentText("Keeping proxy alive while screen is off...")
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Hotspot Bypass: Host Active")
+            .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_menu_share)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Sharing", stopPendingIntent)
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
             .build()
-
-        startForeground(2, notification)
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // This is called when the user swipes the app out of the Recents list
-        val restartServiceIntent = Intent(applicationContext, this.javaClass)
-        restartServiceIntent.setPackage(packageName)
-
-        val restartServicePendingIntent = PendingIntent.getService(
-            applicationContext,
-            1,
-            restartServiceIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        // Schedule the service to restart in 1 second
-        val alarmService = applicationContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmService.set(
-            AlarmManager.ELAPSED_REALTIME,
-            SystemClock.elapsedRealtime() + 1000,
-            restartServicePendingIntent
-        )
-
-        super.onTaskRemoved(rootIntent)
+    private fun updateNotification(content: String) {
+        val notification = createNotification(content)
+        getSystemService(NotificationManager::class.java).notify(2, notification)
     }
 
     private fun acquireLocks() {
-        // Keep CPU running
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BypassVPN::HostWakeLock")
         wakeLock?.acquire()
 
-        // Keep Wi-Fi at high performance
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BypassVPN::WifiLock")
         wifiLock?.acquire()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // This keeps the service alive when swiped away
+        val restartServiceIntent = Intent(applicationContext, this.javaClass).also { it.setPackage(packageName) }
+        val restartServicePendingIntent = PendingIntent.getService(this, 1, restartServiceIntent, PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE)
+        val alarmService = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmService.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 1000, restartServicePendingIntent)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
-        proxyServer?.stop()
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
         super.onDestroy()

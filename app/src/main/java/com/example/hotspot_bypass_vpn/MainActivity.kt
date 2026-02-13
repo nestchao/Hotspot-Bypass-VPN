@@ -149,18 +149,13 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     // --- HOST LOGIC ---
 
     private fun startHost() {
-        // Instead of just creating group, we start the service
         val intent = Intent(this, HostService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
-
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { createNewGroup() }
-            override fun onFailure(reason: Int) { createNewGroup() }
-        })
+        log("Host Service starting in dedicated process...")
     }
 
     private fun createNewGroup() {
@@ -175,21 +170,10 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     }
 
     private fun stopHost() {
-        log("Stopping Host...")
-        // Stop the service
-        stopService(Intent(this, HostService::class.java))
-
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                log("✓ Wi-Fi Group removed")
-                tvHostInfo.text = "Status: Stopped"
-            }
-            override fun onFailure(reason: Int) {
-                log("✗ Failed to remove group: $reason")
-            }
-        })
+        val intent = Intent(this, HostService::class.java).apply { action = "STOP" }
+        startService(intent)
+        log("Host Service stopping...")
     }
-
     // --- CLIENT LOGIC ---
 
     private fun prepareVpn(ip: String, port: Int) {
