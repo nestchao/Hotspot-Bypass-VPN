@@ -93,7 +93,9 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         }
 
         btnStopClient.setOnClickListener {
-            stopVpnService()
+            log("Stopping VPN Service...")
+            val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
+            stopService(intent)
         }
 
         btnDebug.setOnClickListener {
@@ -147,6 +149,14 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     // --- HOST LOGIC ---
 
     private fun startHost() {
+        // Instead of just creating group, we start the service
+        val intent = Intent(this, HostService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+
         manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() { createNewGroup() }
             override fun onFailure(reason: Int) { createNewGroup() }
@@ -166,7 +176,9 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     private fun stopHost() {
         log("Stopping Host...")
-        proxyServer.stop()
+        // Stop the service
+        stopService(Intent(this, HostService::class.java))
+
         manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 log("✓ Wi-Fi Group removed")
@@ -220,9 +232,10 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     fun updateGroupInfo(group: WifiP2pGroup?) {
         if (group != null && group.isGroupOwner) {
-            proxyServer.start()
+            // We don't call proxyServer.start() here anymore,
+            // the HostService handles it.
             tvHostInfo.text = "SSID: ${group.networkName}\nPASS: ${group.passphrase}\nIP: 192.168.49.1\nPORT: 8080"
-            log("Proxy Running (SOCKS5)")
+            log("Proxy Service running in background")
         }
     }
 

@@ -12,6 +12,7 @@
               [DIR] hotspot_bypass_vpn/
                 - DebugUtils.kt
                 - Dnscache.kt
+                - HostService.kt
                 - MainActivity.kt
                 - MyVpnService.kt
                 - Myvpnserviceoptimized.kt

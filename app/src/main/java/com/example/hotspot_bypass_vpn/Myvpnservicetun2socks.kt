@@ -167,6 +167,9 @@ class MyVpnServiceTun2Socks : VpnService() {
             DebugUtils.error("Error closing VPN interface", e)
         }
 
+        stopForeground(true) // Removes the notification
+        stopSelf()           // Ensures the service is killed
+
         super.onDestroy()
     }
 
