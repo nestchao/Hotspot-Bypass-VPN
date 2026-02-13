@@ -30,10 +30,12 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }
@@ -49,6 +51,12 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    // Alternative: Use OkHttp for SOCKS proxy support
+    // OkHttp for SOCKS proxy support
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Local AAR library - tun2socks
+    implementation(files("libs/tun2socks-1.0.4.aar"))
+
+    // Alternative libbox (if you want to keep it as backup)
+    // implementation("io.nekohasekai:libbox:1.8.0")
 }

@@ -66,6 +66,14 @@
                         android:text="Start Sharing"
                         android:backgroundTint="#2196F3"/>
 
+                    <Button
+                        android:id="@+id/btn_stop_host"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Stop Sharing"
+                        android:backgroundTint="#F44336"
+                        android:layout_marginTop="4dp"/>
+
                     <!-- This text will update with SSID/Pass when you click Start -->
                     <TextView
                         android:id="@+id/tv_host_info"
@@ -76,6 +84,7 @@
                         android:padding="8dp"
                         android:layout_marginTop="8dp"
                         android:fontFamily="monospace"/>
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
@@ -131,6 +140,14 @@
                         android:text="Connect &amp; Start VPN"
                         android:backgroundTint="#4CAF50"
                         android:layout_marginTop="8dp"/>
+
+                    <Button
+                        android:id="@+id/btn_stop_client"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Stop VPN"
+                        android:backgroundTint="#F44336"
+                        android:layout_marginTop="4dp"/>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 

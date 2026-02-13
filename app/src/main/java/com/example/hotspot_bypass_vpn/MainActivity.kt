@@ -18,21 +18,24 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import kotlin.concurrent.thread
-import android.provider.Settings
 import androidx.core.content.ContextCompat
+import kotlin.concurrent.thread
+import android.content.DialogInterface
+import android.location.LocationManager
+import android.net.wifi.WifiManager
+import android.provider.Settings
+import androidx.appcompat.app.AlertDialog
+
 
 class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener {
 
     private val proxyServer = ProxyServer()
 
-    // Wifi P2P Variables
     private lateinit var manager: WifiP2pManager
     private lateinit var channel: WifiP2pManager.Channel
     private lateinit var receiver: BroadcastReceiver
     private val intentFilter = IntentFilter()
 
-    // UI Elements
     private lateinit var tvHostInfo: TextView
     private lateinit var tvStatusLog: TextView
     private lateinit var etIp: EditText
@@ -41,17 +44,17 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val btnDebug = findViewById<Button>(R.id.btn_debug)
 
-        // 1. Initialize UI Elements
         val btnStartHost = findViewById<Button>(R.id.btn_start_host)
+        val btnStopHost = findViewById<Button>(R.id.btn_stop_host)
         val btnConnect = findViewById<Button>(R.id.btn_connect)
+        val btnStopClient = findViewById<Button>(R.id.btn_stop_client)
+        val btnDebug = findViewById<Button>(R.id.btn_debug)
         tvHostInfo = findViewById(R.id.tv_host_info)
         tvStatusLog = findViewById(R.id.tv_status_log)
         etIp = findViewById(R.id.et_host_ip)
         etPort = findViewById(R.id.et_host_port)
 
-        // 2. Initialize Wi-Fi Direct
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
 
@@ -62,18 +65,51 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         checkPermissions()
 
-        // 3. Logic for MODE A: HOST (Sharing)
         btnStartHost.setOnClickListener {
+            if (!isWifiEnabled()) {
+                showEnableServiceDialog(
+                    "Wi-Fi Required",
+                    "Wi-Fi must be turned ON to share internet via Wi-Fi Direct.",
+                    Settings.ACTION_WIFI_SETTINGS
+                )
+                return@setOnClickListener
+            }
+
+            if (!isLocationEnabled()) {
+                showEnableServiceDialog(
+                    "Location Required",
+                    "System Location (GPS) must be ON for Android to allow Wi-Fi Direct group creation.",
+                    Settings.ACTION_LOCATION_SOURCE_SETTINGS
+                )
+                return@setOnClickListener
+            }
+
             startHost()
         }
 
-        // Add this listener
+        btnStopHost.setOnClickListener {
+            stopHost()
+        }
+
         btnDebug.setOnClickListener {
             runInternetPingTest()
         }
 
-        // 4. Logic for MODE B: CLIENT (Connecting)
         btnConnect.setOnClickListener {
+            if (!isWifiEnabled()) {
+                showEnableServiceDialog(
+                    "Wi-Fi Required",
+                    "Please turn on Wi-Fi and connect to the Host phone first.",
+                    Settings.ACTION_WIFI_SETTINGS
+                )
+                return@setOnClickListener
+            }
+
+            if (!isLocationEnabled()) {
+                showEnableServiceDialog("Location Required", "Location must be ON to identify the Wi-Fi network properly.", Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                return@setOnClickListener
+            }
+
             val ip = etIp.text.toString()
             val portStr = etPort.text.toString()
 
@@ -83,30 +119,49 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             }
 
             val port = portStr.toIntOrNull() ?: 8080
-
-            // Test connectivity first
             testConnectivity(ip, port)
-
-            // Then start VPN
             prepareVpn(ip, port)
+        }
+
+        btnStopClient.setOnClickListener {
+            stopVpnService()
         }
     }
 
-    // --- VPN CLIENT LOGIC ---
+    private fun stopHost() {
+        log("Stopping Host...")
+        proxyServer.stop()
+
+        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                log("✓ Wi-Fi Group removed")
+                tvHostInfo.text = "Status: Stopped"
+            }
+            override fun onFailure(reason: Int) {
+                log("✗ Failed to remove group: $reason")
+            }
+        })
+    }
+
+    private fun stopVpnService() {
+        log("Stopping VPN Service...")
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
+        stopService(intent)
+        log("✓ VPN stop signal sent")
+    }
 
     private fun prepareVpn(ip: String, port: Int) {
         val intent = VpnService.prepare(this)
         if (intent != null) {
-            // Asks user: "Do you trust this app to start a VPN?"
             startActivityForResult(intent, 102)
         } else {
-            // Already have permission
             startVpnService(ip, port)
         }
     }
 
     private fun startVpnService(ip: String, port: Int) {
-        val intent = Intent(this, MyVpnService::class.java).apply {
+        // Use the new tun2socks service
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
             putExtra("PROXY_IP", ip)
             putExtra("PROXY_PORT", port)
         }
@@ -115,7 +170,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         } else {
             startService(intent)
         }
-        log("VPN Client Starting... Connecting to $ip:$port")
+        log("VPN Client Starting with tun2socks... Connecting to $ip:$port")
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -126,8 +181,6 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             startVpnService(ip, port)
         }
     }
-
-    // --- WIFI DIRECT HOST LOGIC ---
 
     private fun startHost() {
         manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
@@ -151,19 +204,16 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         if (info != null && info.groupFormed) {
             val hostIp = info.groupOwnerAddress?.hostAddress ?: "192.168.49.1"
             log("NETWORK ACTIVE. Host IP: $hostIp")
-            // Use this IP in Phone B
         }
     }
 
     fun updateGroupInfo(group: WifiP2pGroup?) {
         if (group != null && group.isGroupOwner) {
-            proxyServer.start() // Start the SOCKS5 server on Phone A
+            proxyServer.start()
             tvHostInfo.text = "SSID: ${group.networkName}\nPASS: ${group.passphrase}\nIP: 192.168.49.1\nPORT: 8080"
-            log("Proxy Running.")
+            log("Proxy Running with tun2socks support")
         }
     }
-
-    // --- LIFECYCLE ---
 
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -176,8 +226,6 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         super.onResume()
         receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
         registerReceiver(receiver, intentFilter)
-
-        // FIX: Use ContextCompat to support API 24 while using modern security flags
         ContextCompat.registerReceiver(
             this,
             logReceiver,
@@ -190,15 +238,10 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         super.onPause()
         try {
             unregisterReceiver(receiver)
-        } catch (e: IllegalArgumentException) {
-            // Receiver was not registered
-        }
-
+        } catch (e: IllegalArgumentException) {}
         try {
             unregisterReceiver(logReceiver)
-        } catch (e: IllegalArgumentException) {
-            // Receiver was not registered
-        }
+        } catch (e: IllegalArgumentException) {}
     }
 
     override fun onDestroy() {
@@ -215,8 +258,6 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
@@ -233,10 +274,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         thread {
             try {
                 DebugUtils.log("Starting connectivity test...")
-
-                // Test 1: Basic socket connection
                 val canConnect = DebugUtils.testProxyConnection(ip, port)
-
                 runOnUiThread {
                     if (canConnect) {
                         Toast.makeText(this, "✓ Can connect to proxy", Toast.LENGTH_SHORT).show()
@@ -246,12 +284,6 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
                         log("Connectivity test FAILED")
                     }
                 }
-
-                // Test 2: Test internet via proxy (optional)
-                if (canConnect) {
-                    testInternetViaProxy(ip, port)
-                }
-
             } catch (e: Exception) {
                 runOnUiThread {
                     log("Test error: ${e.message}")
@@ -260,42 +292,9 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         }
     }
 
-    private fun testInternetViaProxy(ip: String, port: Int) {
-        thread {
-            try {
-                DebugUtils.log("Testing internet via proxy...")
-
-                // This is a simple test - you'd need to implement proper SOCKS5 client
-                // For now, just log that we're trying
-                log("Attempting to route traffic through proxy $ip:$port")
-
-            } catch (e: Exception) {
-                log("Proxy routing test error: ${e.message}")
-            }
-        }
-    }
-
-    private fun checkVpnPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (Settings.canDrawOverlays(this)) {
-                true
-            } else {
-                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                startActivity(intent)
-                false
-            }
-        } else {
-            true
-        }
-    }
-
     private fun runInternetPingTest() {
         log("--- Starting Connectivity Test ---")
-
         thread {
-            // Test 1: TCP "Ping" to Google DNS (8.8.8.8)
-            // We use a Socket instead of ICMP Ping because SOCKS5 proxies
-            // usually don't support ICMP.
             try {
                 val host = "8.8.8.8"
                 val port = 53
@@ -312,19 +311,36 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
                 log("✗ Internet Unreachable: ${e.message}")
             }
 
-            // Test 2: DNS Resolution
-            // This tests if your handleDnsOverTcp function in MyVpnService is working
             try {
                 log("Testing DNS resolution (google.com)...")
                 val dnsStart = System.currentTimeMillis()
                 val address = java.net.InetAddress.getByName("google.com")
                 val dnsEnd = System.currentTimeMillis()
-
                 log("✓ DNS Success: google.com -> ${address.hostAddress} (${dnsEnd - dnsStart}ms)")
             } catch (e: Exception) {
                 log("✗ DNS Failed: ${e.message}")
-                log("Tip: Check if Phone A has Mobile Data enabled.")
             }
         }
+    }
+
+    private fun isWifiEnabled(): Boolean {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        return wifiManager.isWifiEnabled
+    }
+
+    private fun isLocationEnabled(): Boolean {
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+    }
+
+    private fun showEnableServiceDialog(title: String, message: String, settingsAction: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("Go to Settings") { _, _ ->
+                startActivity(Intent(settingsAction))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 }
