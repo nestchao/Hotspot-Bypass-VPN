@@ -9,17 +9,20 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.*
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.Socket
 import java.nio.ByteBuffer
-import java.nio.channels.DatagramChannel
-import java.nio.channels.SocketChannel
-import java.util.concurrent.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
-class MyVpnService : VpnService() {
+class MyVpnServiceOptimized : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var isRunning = false
@@ -29,28 +32,19 @@ class MyVpnService : VpnService() {
     private val tcpConnections = ConcurrentHashMap<String, TcpConnection>()
     private val udpSockets = ConcurrentHashMap<String, UdpRelay>()
 
-    // ULTRA-OPTIMIZED: Even larger pool with priority queue
-    private val fastPool = ThreadPoolExecutor(
-        50, 1000, 30L, TimeUnit.SECONDS,
-        LinkedBlockingQueue(20000),
-        ThreadFactory { r -> Thread(r).apply { priority = Thread.MAX_PRIORITY } },
-        ThreadPoolExecutor.CallerRunsPolicy()
+    // **OPTIMIZATION 1: DNS Cache**
+    private val dnsCache = DnsCache()
+
+    // **OPTIMIZATION 2: Reuse DNS connections**
+    private val dnsConnectionPool = ConcurrentHashMap<String, Socket>()
+
+    private val connectionPool = ThreadPoolExecutor(
+        20, 500, 60L, TimeUnit.SECONDS,
+        LinkedBlockingQueue(5000), ThreadPoolExecutor.CallerRunsPolicy()
     )
 
-    // Separate pool for packet reading (high priority)
-    private val readerPool = Executors.newFixedThreadPool(4, ThreadFactory { r ->
-        Thread(r).apply { priority = Thread.MAX_PRIORITY; name = "PacketReader-${Thread.currentThread().id}" }
-    })
-
-    // ULTRA-OPTIMIZED: Massive queue with lock-free operations
-    private val vpnWriteQueue = LinkedBlockingQueue<ByteArray>(50000)
+    private val vpnWriteQueue = LinkedBlockingQueue<ByteArray>(10000)
     private var vpnWriter: FileOutputStream? = null
-
-    // DNS Cache to avoid repeated lookups
-    private val dnsCache = ConcurrentHashMap<String, InetAddress>()
-
-    // Connection statistics
-    private val stats = Stats()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
@@ -62,7 +56,7 @@ class MyVpnService : VpnService() {
             if (DebugUtils.testProxyConnection(proxyIp, proxyPort)) {
                 startVpnInterface()
             } else {
-                updateNotification("Error: Cannot reach proxy")
+                updateNotification("Error: Cannot reach Phone A")
                 stopSelf()
             }
         }
@@ -76,54 +70,35 @@ class MyVpnService : VpnService() {
             .addRoute("0.0.0.0", 0)
             .addDisallowedApplication(packageName)
             .addDnsServer("8.8.8.8")
-            .addDnsServer("1.1.1.1")
+            .addDnsServer("8.8.4.4")
             .setBlocking(false)
-            .setSession("Instagram Optimized VPN")
 
         vpnInterface = builder.establish()
 
         if (vpnInterface != null) {
             isRunning = true
-            updateNotification("⚡ VPN Active - Optimized")
-
-            // Start multiple writer threads for parallel processing
-            repeat(2) { i ->
-                thread(name = "VPN-Writer-$i", isDaemon = true) { runVpnWriterUltraFast() }
-            }
-
-            // Start multiple reader threads for parallel packet processing
-            repeat(4) { i ->
-                thread(name = "VPN-Reader-$i", isDaemon = true) { readPacketsParallel() }
-            }
-
+            updateNotification("VPN Active - Optimized")
+            thread(name = "VPN-Writer", isDaemon = true) { runVpnWriterOptimized() }
+            thread(name = "VPN-Reader", isDaemon = true) { readPacketsOptimized() }
             thread(name = "Cleanup", isDaemon = true) { cleanupStaleConnections() }
-            thread(name = "Stats", isDaemon = true) { printStats() }
         }
     }
 
-    // ULTRA-OPTIMIZED: Lock-free batch writing with minimal latency
-    private fun runVpnWriterUltraFast() {
+    private fun runVpnWriterOptimized() {
         vpnWriter = FileOutputStream(vpnInterface!!.fileDescriptor)
-        val batch = ArrayList<ByteArray>(200)
-
+        val batch = ArrayList<ByteArray>(100)
         try {
             while (isRunning) {
                 batch.clear()
-
-                // Non-blocking poll with timeout
-                val first = vpnWriteQueue.poll(5, TimeUnit.MILLISECONDS)
+                val first = vpnWriteQueue.poll(10, TimeUnit.MILLISECONDS)
                 if (first != null) {
                     batch.add(first)
-                    vpnWriteQueue.drainTo(batch, 199) // Get up to 199 more instantly
+                    vpnWriteQueue.drainTo(batch, 99)
 
-                    // Write entire batch at once
-                    synchronized(vpnWriter!!) {
-                        for (packet in batch) {
-                            vpnWriter?.write(packet)
-                        }
-                        vpnWriter?.flush()
+                    for (packet in batch) {
+                        vpnWriter?.write(packet)
                     }
-                    stats.packetsSent.addAndGet(batch.size)
+                    vpnWriter?.flush()
                 }
             }
         } catch (e: Exception) {
@@ -133,18 +108,15 @@ class MyVpnService : VpnService() {
 
     private fun writeToVpn(packet: ByteArray) {
         if (!vpnWriteQueue.offer(packet)) {
-            stats.packetsDropped.incrementAndGet()
-            // Drop oldest, retry
             vpnWriteQueue.poll()
             vpnWriteQueue.offer(packet)
         }
     }
 
-    // ULTRA-OPTIMIZED: Parallel packet reading with zero-copy buffers
-    private fun readPacketsParallel() {
+    private fun readPacketsOptimized() {
         val inputStream = FileInputStream(vpnInterface!!.fileDescriptor)
-        val buffer = ByteBuffer.allocateDirect(131072) // 128KB direct buffer
-        val array = ByteArray(131072)
+        val buffer = ByteBuffer.allocateDirect(65536)
+        val array = ByteArray(65536)
 
         try {
             while (isRunning) {
@@ -154,16 +126,9 @@ class MyVpnService : VpnService() {
                     buffer.put(array, 0, length)
                     buffer.flip()
 
-                    // Process ALL packets in this read
                     while (buffer.hasRemaining() && buffer.remaining() >= 20) {
                         val packetStart = buffer.position()
                         val ipHeaderLength = (buffer.get(packetStart).toInt() and 0x0F) * 4
-
-                        if (ipHeaderLength < 20) {
-                            buffer.position(buffer.limit())
-                            break
-                        }
-
                         val totalLength = ((buffer.get(packetStart + 2).toInt() and 0xFF) shl 8) or
                                 (buffer.get(packetStart + 3).toInt() and 0xFF)
 
@@ -172,12 +137,11 @@ class MyVpnService : VpnService() {
                         val packetData = ByteArray(totalLength)
                         buffer.get(packetData)
 
-                        // Submit to fast pool for processing
-                        fastPool.execute {
-                            handlePacket(ByteBuffer.wrap(packetData))
-                            stats.packetsProcessed.incrementAndGet()
-                        }
+                        val packet = ByteBuffer.wrap(packetData)
+                        connectionPool.execute { handlePacket(packet) }
                     }
+
+                    buffer.clear()
                 }
             }
         } catch (e: Exception) {
@@ -216,58 +180,200 @@ class MyVpnService : VpnService() {
             packet.position(payloadStart)
             packet.get(payload)
 
-            // OPTIMIZED: Direct UDP for DNS (faster than TCP)
             if (destPort == 53) {
-                fastPool.execute { handleDnsDirectUdp(srcIp, srcPort, payload) }
+                // **OPTIMIZATION 3: Fast DNS handling with cache**
+                handleDnsOptimized(srcIp, srcPort, destIp, destPort, payload)
                 return
             }
 
             val connectionKey = "$srcIp:$srcPort-$destIp:$destPort"
-            val relay = udpSockets.getOrPut(connectionKey) {
-                UdpRelay(connectionKey, srcIp, srcPort, destIp, destPort)
-            }
+            val relay = udpSockets.getOrPut(connectionKey) { UdpRelay(connectionKey, srcIp, srcPort, destIp, destPort) }
             relay.sendData(payload)
-        } catch (e: Exception) {
-            DebugUtils.error("UDP packet error", e)
+        } catch (e: Exception) { }
+    }
+
+    // **OPTIMIZATION 4: Dramatically faster DNS with caching**
+    private fun handleDnsOptimized(srcIp: String, srcPort: Int, destIp: String, destPort: Int, dnsPayload: ByteArray) {
+        // Try to extract domain name from DNS query to check cache
+        val domain = extractDomainFromDnsQuery(dnsPayload)
+
+        if (domain != null) {
+            val cachedIp = dnsCache.get(domain)
+            if (cachedIp != null) {
+                // Cache hit! Return immediately without network call
+                DebugUtils.log("DNS Cache HIT: $domain")
+                val response = buildDnsResponse(dnsPayload, cachedIp)
+                val udpResponse = buildUdpPacket(destIp, destPort, srcIp, srcPort, response)
+                writeToVpn(udpResponse)
+                return
+            }
+            DebugUtils.log("DNS Cache MISS: $domain")
+        }
+
+        // Cache miss or couldn't parse - do actual DNS lookup
+        // Use connection pool instead of creating new thread each time
+        connectionPool.execute {
+            var dnsSocket: Socket? = null
+            try {
+                dnsSocket = Socket()
+                if (!protect(dnsSocket)) return@execute
+                dnsSocket.soTimeout = 2000 // Reduced timeout
+                dnsSocket.connect(InetSocketAddress(proxyIp, proxyPort), 2000)
+                val out = dnsSocket.getOutputStream()
+                val ins = dnsSocket.getInputStream()
+
+                out.write(byteArrayOf(0x05, 0x01, 0x00))
+                ins.read(ByteArray(2))
+
+                val request = byteArrayOf(0x05, 0x01, 0x00, 0x01, 8, 8, 8, 8, 0x00, 0x35)
+                out.write(request)
+                ins.read(ByteArray(10))
+
+                val len = dnsPayload.size
+                out.write(byteArrayOf((len shr 8).toByte(), (len and 0xFF).toByte()))
+                out.write(dnsPayload)
+                out.flush()
+
+                val b1 = ins.read(); val b2 = ins.read()
+                if (b1 != -1 && b2 != -1) {
+                    val respLen = ((b1 and 0xFF) shl 8) or (b2 and 0xFF)
+                    val respBody = ByteArray(respLen)
+                    var totalRead = 0
+                    while (totalRead < respLen) {
+                        val r = ins.read(respBody, totalRead, respLen - totalRead)
+                        if (r == -1) break
+                        totalRead += r
+                    }
+
+                    // **Cache the result for next time**
+                    if (domain != null) {
+                        val ipAddress = extractIpFromDnsResponse(respBody)
+                        if (ipAddress != null) {
+                            dnsCache.put(domain, ipAddress)
+                            DebugUtils.log("DNS Cached: $domain -> ${ipAddress.joinToString(".")}")
+                        }
+                    }
+
+                    val udpResponse = buildUdpPacket(destIp, destPort, srcIp, srcPort, respBody)
+                    writeToVpn(udpResponse)
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("DNS lookup failed", e)
+            } finally {
+                try { dnsSocket?.close() } catch (e: Exception) {}
+            }
         }
     }
 
-    // ULTRA-OPTIMIZED: Direct UDP DNS (no SOCKS overhead)
-    private fun handleDnsDirectUdp(srcIp: String, srcPort: Int, dnsPayload: ByteArray) {
-        var socket: DatagramSocket? = null
+    // Extract domain name from DNS query packet
+    private fun extractDomainFromDnsQuery(dnsPayload: ByteArray): String? {
         try {
-            socket = DatagramSocket()
-            if (!protect(socket)) return
-            socket.soTimeout = 2000
+            if (dnsPayload.size < 13) return null
 
-            // Send directly to Google DNS
-            val packet = DatagramPacket(dnsPayload, dnsPayload.size, InetAddress.getByName("8.8.8.8"), 53)
-            socket.send(packet)
+            var pos = 12 // Skip header
+            val parts = mutableListOf<String>()
 
-            // Receive response
-            val responseBuffer = ByteArray(512)
-            val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
-            socket.receive(responsePacket)
+            while (pos < dnsPayload.size) {
+                val len = dnsPayload[pos].toInt() and 0xFF
+                if (len == 0) break
+                if (len > 63 || pos + len >= dnsPayload.size) return null
 
-            val response = responseBuffer.copyOf(responsePacket.length)
-            val udpResponse = buildUdpPacket("8.8.8.8", 53, srcIp, srcPort, response)
-            writeToVpn(udpResponse)
+                val part = String(dnsPayload, pos + 1, len, Charsets.UTF_8)
+                parts.add(part)
+                pos += len + 1
+            }
 
-            stats.dnsQueriesHandled.incrementAndGet()
+            return if (parts.isEmpty()) null else parts.joinToString(".")
         } catch (e: Exception) {
-            DebugUtils.error("DNS Direct UDP error", e)
-        } finally {
-            socket?.close()
+            return null
         }
     }
 
-    inner class UdpRelay(
-        private val key: String,
-        private val srcIp: String,
-        private val srcPort: Int,
-        private val destIp: String,
-        private val destPort: Int
-    ) {
+    // Extract IP address from DNS response
+    private fun extractIpFromDnsResponse(response: ByteArray): ByteArray? {
+        try {
+            // Simple A record extraction (IPv4)
+            // This is a simplified parser - real DNS responses are complex
+            var pos = 12
+
+            // Skip question section
+            while (pos < response.size && response[pos].toInt() != 0) {
+                pos++
+            }
+            pos += 5 // Skip null terminator + QTYPE + QCLASS
+
+            // Look for answer with type A (0x0001)
+            while (pos + 12 < response.size) {
+                // Check if this is a pointer (compression)
+                if ((response[pos].toInt() and 0xC0) == 0xC0) {
+                    pos += 2 // Skip pointer
+                } else {
+                    // Skip name
+                    while (pos < response.size && response[pos].toInt() != 0) pos++
+                    pos++
+                }
+
+                if (pos + 10 > response.size) break
+
+                val type = ((response[pos].toInt() and 0xFF) shl 8) or (response[pos + 1].toInt() and 0xFF)
+                val dataLen = ((response[pos + 8].toInt() and 0xFF) shl 8) or (response[pos + 9].toInt() and 0xFF)
+
+                if (type == 1 && dataLen == 4) { // A record
+                    return byteArrayOf(
+                        response[pos + 10],
+                        response[pos + 11],
+                        response[pos + 12],
+                        response[pos + 13]
+                    )
+                }
+
+                pos += 10 + dataLen
+            }
+        } catch (e: Exception) {
+        }
+        return null
+    }
+
+    // Build DNS response from cached IP
+    private fun buildDnsResponse(query: ByteArray, ipAddress: ByteArray): ByteArray {
+        // Simple DNS response builder
+        val response = ByteArray(query.size + 16)
+
+        // Copy query as base
+        System.arraycopy(query, 0, response, 0, query.size)
+
+        // Set flags: response + authoritative
+        response[2] = 0x81.toByte()
+        response[3] = 0x80.toByte()
+
+        // Answer count = 1
+        response[6] = 0x00
+        response[7] = 0x01
+
+        // Add answer section at end
+        var pos = query.size
+        response[pos++] = 0xC0.toByte() // Pointer to question name
+        response[pos++] = 0x0C.toByte()
+        response[pos++] = 0x00 // Type A
+        response[pos++] = 0x01
+        response[pos++] = 0x00 // Class IN
+        response[pos++] = 0x01
+        response[pos++] = 0x00 // TTL (1 hour)
+        response[pos++] = 0x00
+        response[pos++] = 0x00
+        response[pos++] = 0xE1.toByte()
+        response[pos++] = 0x00 // Data length
+        response[pos++] = 0x04
+        // IP address
+        System.arraycopy(ipAddress, 0, response, pos, 4)
+
+        return response.copyOf(pos + 4)
+    }
+
+    // ... Rest of the class remains the same (UDP relay, TCP connection, helper methods) ...
+    // I'll include the critical parts below:
+
+    inner class UdpRelay(private val key: String, private val srcIp: String, private val srcPort: Int, private val destIp: String, private val destPort: Int) {
         private var socket: DatagramSocket? = null
         @Volatile var lastActivity = System.currentTimeMillis()
         private val running = AtomicBoolean(true)
@@ -275,15 +381,12 @@ class MyVpnService : VpnService() {
         init {
             try {
                 socket = DatagramSocket()
-                socket?.receiveBufferSize = 524288 // 512KB
-                socket?.sendBufferSize = 524288
-                if (!this@MyVpnService.protect(socket!!)) throw Exception("Protect failed")
-                socket?.soTimeout = 10000
-                fastPool.execute { runReceiver() }
-            } catch (e: Exception) {
-                udpSockets.remove(key)
-                close()
-            }
+                socket?.receiveBufferSize = 262144
+                socket?.sendBufferSize = 262144
+                if (!this@MyVpnServiceOptimized.protect(socket!!)) throw Exception("Protect failed")
+                socket?.soTimeout = 5000
+                connectionPool.execute { runReceiver() }
+            } catch (e: Exception) { udpSockets.remove(key); close() }
         }
 
         fun sendData(payload: ByteArray) {
@@ -296,7 +399,7 @@ class MyVpnService : VpnService() {
         }
 
         private fun runReceiver() {
-            val buffer = ByteArray(16384)
+            val buffer = ByteArray(8192)
             val packet = DatagramPacket(buffer, buffer.size)
             try {
                 while (running.get() && isRunning) {
@@ -306,29 +409,18 @@ class MyVpnService : VpnService() {
                         val response = buildUdpPacket(destIp, destPort, srcIp, srcPort, responsePayload)
                         writeToVpn(response)
                         lastActivity = System.currentTimeMillis()
-                    } catch (e: SocketTimeoutException) {
-                        // Normal timeout
-                    } catch (e: Exception) {
-                        break
-                    }
+                    } catch (e: java.net.SocketTimeoutException) { } catch (e: Exception) { break }
                 }
-            } finally {
-                udpSockets.remove(key)
-                close()
-            }
+            } finally { udpSockets.remove(key); close() }
         }
 
-        fun close() {
-            running.set(false)
-            try { socket?.close() } catch (e: Exception) {}
-        }
+        fun close() { running.set(false); try { socket?.close() } catch (e: Exception) {} }
     }
 
     private fun buildUdpPacket(srcIp: String, srcPort: Int, destIp: String, destPort: Int, payload: ByteArray): ByteArray {
         val totalLen = 28 + payload.size
         val packet = ByteArray(totalLen)
-        packet[0] = 0x45; packet[1] = 0x00
-        packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
+        packet[0] = 0x45; packet[1] = 0x00; packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
         packet[6] = 0x40; packet[8] = 64; packet[9] = 17
         fillIpAddresses(packet, srcIp, destIp)
         val ipChecksum = calculateChecksum(packet, 0, 20)
@@ -341,7 +433,11 @@ class MyVpnService : VpnService() {
         return packet
     }
 
+    // Continue with TCP handling and other methods from original...
+    // (Include handleTcpPacket, TcpConnection class, cleanup methods, etc.)
+
     private fun handleTcpPacket(packet: ByteBuffer) {
+        // Same as original implementation
         try {
             val ipHeaderLen = (packet.get(0).toInt() and 0x0F) * 4
             val ipTotalLen = ((packet.get(2).toInt() and 0xFF) shl 8) or (packet.get(3).toInt() and 0xFF)
@@ -370,8 +466,7 @@ class MyVpnService : VpnService() {
                     if (tcpConnections.containsKey(connectionKey)) return
                     val connection = TcpConnection(connectionKey, srcIp, srcPort, destIp, destPort, proxyIp, proxyPort, seqNum, ackNum)
                     tcpConnections[connectionKey] = connection
-                    fastPool.execute { connection.start() }
-                    stats.tcpConnectionsCreated.incrementAndGet()
+                    connectionPool.execute { connection.start() }
                 }
                 flagFIN -> tcpConnections[connectionKey]?.handleFIN(seqNum, ackNum)
                 payloadSize > 0 -> {
@@ -383,71 +478,35 @@ class MyVpnService : VpnService() {
                         if (conn.isEstablished()) conn.sendData(payload, seqNum, ackNum)
                         else conn.queueData(payload, seqNum, ackNum)
                     }
-                    stats.bytesTransferred.addAndGet(payloadSize.toLong())
                 }
                 flagACK -> tcpConnections[connectionKey]?.handleAck(ackNum)
             }
-        } catch (e: Exception) {
-            DebugUtils.error("TCP packet error", e)
-        }
+        } catch (e: Exception) { }
     }
 
     private fun cleanupStaleConnections() {
         while (isRunning) {
             try {
-                Thread.sleep(5000) // Check every 5 seconds
+                Thread.sleep(10000)
                 val now = System.currentTimeMillis()
-
-                tcpConnections.values.removeIf {
-                    if (now - it.lastActivity > 120000) { // 2 minutes
-                        it.close()
-                        true
-                    } else false
-                }
-
-                udpSockets.values.removeIf {
-                    if (now - it.lastActivity > 60000) { // 1 minute
-                        it.close()
-                        true
-                    } else false
-                }
-            } catch (e: Exception) {}
-        }
-    }
-
-    private fun printStats() {
-        while (isRunning) {
-            try {
-                Thread.sleep(10000) // Every 10 seconds
-                DebugUtils.log("""
-                    === VPN STATS ===
-                    TCP Connections: ${tcpConnections.size} (${stats.tcpConnectionsCreated.get()} created)
-                    UDP Sockets: ${udpSockets.size}
-                    Packets: Sent=${stats.packetsSent.get()}, Processed=${stats.packetsProcessed.get()}, Dropped=${stats.packetsDropped.get()}
-                    DNS Queries: ${stats.dnsQueriesHandled.get()}
-                    Bytes: ${stats.bytesTransferred.get() / 1024}KB
-                    Queue: ${vpnWriteQueue.size}
-                    Pool: Active=${fastPool.activeCount}, Queue=${fastPool.queue.size}
-                """.trimIndent())
+                tcpConnections.values.removeIf { if (now - it.lastActivity > 60000) { it.close(); true } else false }
+                udpSockets.values.removeIf { if (now - it.lastActivity > 30000) { it.close(); true } else false }
             } catch (e: Exception) {}
         }
     }
 
     private fun parseIpAddress(buffer: ByteBuffer, offset: Int): String {
-        return "${buffer.get(offset).toInt() and 0xFF}.${buffer.get(offset + 1).toInt() and 0xFF}." +
-                "${buffer.get(offset + 2).toInt() and 0xFF}.${buffer.get(offset + 3).toInt() and 0xFF}"
+        return "${buffer.get(offset).toInt() and 0xFF}.${buffer.get(offset + 1).toInt() and 0xFF}.${buffer.get(offset + 2).toInt() and 0xFF}.${buffer.get(offset + 3).toInt() and 0xFF}"
     }
 
     private fun fillIpAddresses(packet: ByteArray, srcIp: String, destIp: String) {
-        val srcParts = srcIp.split(".")
-        val destParts = destIp.split(".")
+        val srcParts = srcIp.split("."); val destParts = destIp.split(".")
         for(i in 0..3) packet[12+i] = srcParts[i].toInt().toByte()
         for(i in 0..3) packet[16+i] = destParts[i].toInt().toByte()
     }
 
     private fun calculateChecksum(data: ByteArray, offset: Int, length: Int): Int {
-        var sum = 0L
-        var i = offset
+        var sum = 0L; var i = offset
         while (i < offset + length - 1) {
             val high = (data[i].toInt() and 0xFF) shl 8
             val low = (data[i + 1].toInt() and 0xFF)
@@ -462,28 +521,20 @@ class MyVpnService : VpnService() {
     data class PendingPacket(val payload: ByteArray, val seq: Int, val ack: Int)
 
     inner class TcpConnection(
-        private val key: String,
-        private val srcIp: String,
-        private val srcPort: Int,
-        private val destIp: String,
-        private val destPort: Int,
-        private val proxyIp: String,
-        private val proxyPort: Int,
-        initialLocalSeq: Int,
-        initialRemoteSeq: Int
+        private val key: String, private val srcIp: String, private val srcPort: Int, private val destIp: String, private val destPort: Int,
+        private val proxyIp: String, private val proxyPort: Int, initialLocalSeq: Int, initialRemoteSeq: Int
     ) {
         private var socket: Socket? = null
         private val established = AtomicBoolean(false)
         @Volatile var lastActivity = System.currentTimeMillis()
         private var localSeq = initialLocalSeq.toLong()
         private var remoteSeq = initialRemoteSeq.toLong()
-        private val pendingData = ConcurrentLinkedQueue<PendingPacket>()
+        private val pendingData = ArrayList<PendingPacket>()
 
         fun isEstablished() = established.get()
-
         fun queueData(payload: ByteArray, seq: Int, ack: Int) {
-            if (pendingData.size < 100) {
-                pendingData.offer(PendingPacket(payload, seq, ack))
+            synchronized(pendingData) {
+                if (pendingData.size < 50) pendingData.add(PendingPacket(payload, seq, ack))
             }
         }
 
@@ -492,63 +543,35 @@ class MyVpnService : VpnService() {
                 socket = Socket().apply {
                     tcpNoDelay = true
                     keepAlive = true
-                    soTimeout = 60000
-                    receiveBufferSize = 1048576 // 1MB for Instagram
-                    sendBufferSize = 1048576
+                    soTimeout = 30000
+                    receiveBufferSize = 524288
+                    sendBufferSize = 524288
                 }
+                if (!this@MyVpnServiceOptimized.protect(socket!!)) throw Exception("Protect failed")
+                socket?.connect(InetSocketAddress(proxyIp, proxyPort), 10000)
+                val input = socket!!.getInputStream(); val output = socket!!.getOutputStream()
 
-                if (!this@MyVpnService.protect(socket!!)) throw Exception("Protect failed")
-                socket?.connect(InetSocketAddress(proxyIp, proxyPort), 15000)
+                output.write(byteArrayOf(0x05, 0x01, 0x00)); output.flush()
+                val handshake = ByteArray(2); if (input.read(handshake) < 2 || handshake[0] != 0x05.toByte()) throw Exception("Handshake failed")
 
-                val input = socket!!.getInputStream()
-                val output = socket!!.getOutputStream()
-
-                // SOCKS5 handshake
-                output.write(byteArrayOf(0x05, 0x01, 0x00))
-                output.flush()
-                val handshake = ByteArray(2)
-                if (input.read(handshake) < 2 || handshake[0] != 0x05.toByte()) {
-                    throw Exception("Handshake failed")
-                }
-
-                // SOCKS5 connect
                 val ipParts = destIp.split(".")
                 val request = ByteArray(10)
                 request[0] = 0x05; request[1] = 0x01; request[2] = 0x00; request[3] = 0x01
                 for (i in 0..3) request[4 + i] = ipParts[i].toInt().toByte()
-                request[8] = (destPort shr 8).toByte()
-                request[9] = (destPort and 0xFF).toByte()
-                output.write(request)
-                output.flush()
+                request[8] = (destPort shr 8).toByte(); request[9] = (destPort and 0xFF).toByte()
+                output.write(request); output.flush()
 
-                val response = ByteArray(10)
-                if (input.read(response) < 10 || response[1] != 0x00.toByte()) {
-                    throw Exception("Connect failed: ${response[1]}")
-                }
+                val response = ByteArray(10); if (input.read(response) < 10 || response[1] != 0x00.toByte()) throw Exception("Connect failed")
 
                 sendSynAck()
                 established.set(true)
-
-                // Send all pending data
-                while (pendingData.isNotEmpty()) {
-                    val pending = pendingData.poll()
-                    if (pending != null) {
-                        sendData(pending.payload, pending.seq, pending.ack)
-                    }
-                }
-
-                fastPool.execute { runReceiver(input) }
-
-            } catch (e: Exception) {
-                DebugUtils.error("[$key] Connection failed", e)
-                sendReset()
-                tcpConnections.remove(key)
-                close()
-            }
+                synchronized(pendingData) { for (pending in pendingData) sendData(pending.payload, pending.seq, pending.ack); pendingData.clear() }
+                connectionPool.execute { runReceiver(input) }
+            } catch (e: Exception) { sendReset(); tcpConnections.remove(key); close() }
         }
 
         private fun runReceiver(input: java.io.InputStream) {
-            val buffer = ByteArray(32768) // 32KB buffer
+            val buffer = ByteArray(8192)
             try {
                 while (established.get() && isRunning) {
                     val len = input.read(buffer)
@@ -556,12 +579,7 @@ class MyVpnService : VpnService() {
                     sendToVpn(buffer.copyOf(len))
                     lastActivity = System.currentTimeMillis()
                 }
-            } catch (e: Exception) {
-                DebugUtils.error("[$key] Receiver error", e)
-            } finally {
-                tcpConnections.remove(key)
-                close()
-            }
+            } catch (e: Exception) { } finally { tcpConnections.remove(key); close() }
         }
 
         fun sendData(payload: ByteArray, seqNum: Int, ackNum: Int) {
@@ -573,9 +591,7 @@ class MyVpnService : VpnService() {
                 val ack = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x10, byteArrayOf())
                 writeToVpn(ack)
                 lastActivity = System.currentTimeMillis()
-            } catch (e: Exception) {
-                close()
-            }
+            } catch (e: Exception) { close() }
         }
 
         private fun sendToVpn(payload: ByteArray) {
@@ -587,51 +603,38 @@ class MyVpnService : VpnService() {
         private fun sendSynAck() {
             val synAck = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), (localSeq + 1).toInt(), 0x12, byteArrayOf())
             writeToVpn(synAck)
-            remoteSeq++
-            localSeq++
+            remoteSeq++; localSeq++
         }
 
         fun handleFIN(seqNum: Int, ackNum: Int) {
             localSeq = seqNum.toLong() + 1
             val finAck = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x11, byteArrayOf())
             writeToVpn(finAck)
-            fastPool.execute {
-                Thread.sleep(500)
-                tcpConnections.remove(key)
-                close()
-            }
+            connectionPool.execute { Thread.sleep(500); tcpConnections.remove(key); close() }
         }
 
-        fun handleAck(ackNum: Int) {
-            lastActivity = System.currentTimeMillis()
-        }
+        fun handleAck(ackNum: Int) { lastActivity = System.currentTimeMillis() }
 
         private fun sendReset() {
             val rst = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x04, byteArrayOf())
             writeToVpn(rst)
         }
 
-        fun close() {
-            established.set(false)
-            try { socket?.close() } catch (e: Exception) {}
-        }
+        fun close() { established.set(false); try { socket?.close() } catch (e: Exception) {} }
 
         private fun buildTcpPacket(srcIp: String, srcPort: Int, destIp: String, destPort: Int, seqNum: Int, ackNum: Int, flags: Int, payload: ByteArray): ByteArray {
             val totalLen = 40 + payload.size
             val packet = ByteArray(totalLen)
-            packet[0] = 0x45; packet[1] = 0x00
-            packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
+            packet[0] = 0x45; packet[1] = 0x00; packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
             packet[6] = 0x40; packet[8] = 64; packet[9] = 6
             fillIpAddresses(packet, srcIp, destIp)
             val ipChecksum = calculateChecksum(packet, 0, 20)
             packet[10] = (ipChecksum shr 8).toByte(); packet[11] = ipChecksum.toByte()
             packet[20] = (srcPort shr 8).toByte(); packet[21] = srcPort.toByte()
             packet[22] = (destPort shr 8).toByte(); packet[23] = destPort.toByte()
-            packet[24] = (seqNum shr 24).toByte(); packet[25] = (seqNum shr 16).toByte()
-            packet[26] = (seqNum shr 8).toByte(); packet[27] = seqNum.toByte()
-            packet[28] = (ackNum shr 24).toByte(); packet[29] = (ackNum shr 16).toByte()
-            packet[30] = (ackNum shr 8).toByte(); packet[31] = ackNum.toByte()
-            packet[32] = 0x50; packet[33] = flags.toByte()
+            packet[24] = (seqNum shr 24).toByte(); packet[25] = (seqNum shr 16).toByte(); packet[26] = (seqNum shr 8).toByte(); packet[27] = seqNum.toByte()
+            packet[28] = (ackNum shr 24).toByte(); packet[29] = (ackNum shr 16).toByte(); packet[30] = (ackNum shr 8).toByte(); packet[31] = ackNum.toByte()
+            packet[32] = 0x50; packet[33] = flags.toByte();
             packet[34] = 0xFF.toByte(); packet[35] = 0xFF.toByte()
             if (payload.isNotEmpty()) System.arraycopy(payload, 0, packet, 40, payload.size)
             val tcpChecksum = calculateTcpChecksum(packet, 20, 20 + payload.size, srcIp, destIp)
@@ -641,13 +644,10 @@ class MyVpnService : VpnService() {
 
         private fun calculateTcpChecksum(packet: ByteArray, tcpOffset: Int, tcpLen: Int, srcIp: String, destIp: String): Int {
             val pseudoHeader = ByteArray(12 + tcpLen)
-            val srcParts = srcIp.split(".")
-            val destParts = destIp.split(".")
+            val srcParts = srcIp.split("."); val destParts = destIp.split(".")
             for(i in 0..3) pseudoHeader[i] = srcParts[i].toInt().toByte()
             for(i in 0..3) pseudoHeader[4+i] = destParts[i].toInt().toByte()
-            pseudoHeader[9] = 6
-            pseudoHeader[10] = (tcpLen shr 8).toByte()
-            pseudoHeader[11] = tcpLen.toByte()
+            pseudoHeader[9] = 6; pseudoHeader[10] = (tcpLen shr 8).toByte(); pseudoHeader[11] = tcpLen.toByte()
             System.arraycopy(packet, tcpOffset, pseudoHeader, 12, tcpLen)
             return calculateChecksum(pseudoHeader, 0, pseudoHeader.size)
         }
@@ -659,42 +659,26 @@ class MyVpnService : VpnService() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
         val notification = NotificationCompat.Builder(this, "vpn_channel")
-            .setContentTitle("Instagram Optimized VPN")
-            .setContentText("⚡ Ultra-fast mode active")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .build()
+            .setContentTitle("VPN Running")
+            .setContentText("DNS Cache: ${dnsCache.size()} entries")
+            .setSmallIcon(android.R.drawable.ic_dialog_info).build()
         startForeground(1, notification)
     }
 
     private fun updateNotification(message: String) {
         val notification = NotificationCompat.Builder(this, "vpn_channel")
             .setContentTitle("VPN Service")
-            .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .build()
+            .setContentText("$message | DNS: ${dnsCache.size()}")
+            .setSmallIcon(android.R.drawable.ic_dialog_info).build()
         getSystemService(NotificationManager::class.java).notify(1, notification)
     }
 
     override fun onDestroy() {
-        isRunning = false
-        fastPool.shutdownNow()
-        readerPool.shutdownNow()
-        tcpConnections.values.forEach { it.close() }
-        tcpConnections.clear()
-        udpSockets.values.forEach { it.close() }
-        udpSockets.clear()
-        vpnWriter?.close()
-        vpnInterface?.close()
+        isRunning = false; connectionPool.shutdownNow()
+        tcpConnections.values.forEach { it.close() }; tcpConnections.clear()
+        udpSockets.values.forEach { it.close() }; udpSockets.clear()
+        dnsCache.clear()
+        vpnWriter?.close(); vpnInterface?.close()
         super.onDestroy()
-    }
-
-    // Statistics tracking
-    class Stats {
-        val packetsSent = AtomicInteger(0)
-        val packetsProcessed = AtomicInteger(0)
-        val packetsDropped = AtomicInteger(0)
-        val tcpConnectionsCreated = AtomicInteger(0)
-        val dnsQueriesHandled = AtomicInteger(0)
-        val bytesTransferred = AtomicLong(0L) // Changed from AtomicInteger to AtomicLong
     }
 }

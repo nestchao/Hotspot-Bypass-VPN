@@ -106,7 +106,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     }
 
     private fun startVpnService(ip: String, port: Int) {
-        val intent = Intent(this, MyVpnService::class.java).apply {
+        val intent =  Intent(this, MyVpnServiceOptimized::class.java).apply {
             putExtra("PROXY_IP", ip)
             putExtra("PROXY_PORT", port)
         }
