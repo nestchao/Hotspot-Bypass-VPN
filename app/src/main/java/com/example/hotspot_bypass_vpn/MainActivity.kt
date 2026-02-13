@@ -6,31 +6,28 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.VpnService
+import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlin.concurrent.thread
-import android.content.DialogInterface
-import android.location.LocationManager
-import android.net.wifi.WifiManager
-import android.provider.Settings
-import androidx.appcompat.app.AlertDialog
-
 
 class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener {
 
     private val proxyServer = ProxyServer()
-
     private lateinit var manager: WifiP2pManager
     private lateinit var channel: WifiP2pManager.Channel
     private lateinit var receiver: BroadcastReceiver
@@ -45,6 +42,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // UI Initialization
         val btnStartHost = findViewById<Button>(R.id.btn_start_host)
         val btnStopHost = findViewById<Button>(R.id.btn_stop_host)
         val btnConnect = findViewById<Button>(R.id.btn_connect)
@@ -55,6 +53,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         etIp = findViewById(R.id.et_host_ip)
         etPort = findViewById(R.id.et_host_port)
 
+        // Wi-Fi Direct Initialization
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
 
@@ -65,73 +64,109 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         checkPermissions()
 
+        // --- BUTTON LOGIC ---
+
         btnStartHost.setOnClickListener {
-            if (!isWifiEnabled()) {
-                showEnableServiceDialog(
-                    "Wi-Fi Required",
-                    "Wi-Fi must be turned ON to share internet via Wi-Fi Direct.",
-                    Settings.ACTION_WIFI_SETTINGS
-                )
-                return@setOnClickListener
+            if (checkHardwareStatus()) {
+                startHost()
             }
-
-            if (!isLocationEnabled()) {
-                showEnableServiceDialog(
-                    "Location Required",
-                    "System Location (GPS) must be ON for Android to allow Wi-Fi Direct group creation.",
-                    Settings.ACTION_LOCATION_SOURCE_SETTINGS
-                )
-                return@setOnClickListener
-            }
-
-            startHost()
         }
 
         btnStopHost.setOnClickListener {
             stopHost()
         }
 
-        btnDebug.setOnClickListener {
-            runInternetPingTest()
-        }
-
         btnConnect.setOnClickListener {
-            if (!isWifiEnabled()) {
-                showEnableServiceDialog(
-                    "Wi-Fi Required",
-                    "Please turn on Wi-Fi and connect to the Host phone first.",
-                    Settings.ACTION_WIFI_SETTINGS
-                )
-                return@setOnClickListener
+            if (checkHardwareStatus()) {
+                val ip = etIp.text.toString()
+                val portStr = etPort.text.toString()
+
+                if (ip.isEmpty() || portStr.isEmpty()) {
+                    Toast.makeText(this, "Please enter IP and Port", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                val port = portStr.toIntOrNull() ?: 8080
+                testConnectivity(ip, port)
+                prepareVpn(ip, port)
             }
-
-            if (!isLocationEnabled()) {
-                showEnableServiceDialog("Location Required", "Location must be ON to identify the Wi-Fi network properly.", Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                return@setOnClickListener
-            }
-
-            val ip = etIp.text.toString()
-            val portStr = etPort.text.toString()
-
-            if (ip.isEmpty() || portStr.isEmpty()) {
-                Toast.makeText(this, "Please enter IP and Port", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val port = portStr.toIntOrNull() ?: 8080
-            testConnectivity(ip, port)
-            prepareVpn(ip, port)
         }
 
         btnStopClient.setOnClickListener {
             stopVpnService()
         }
+
+        btnDebug.setOnClickListener {
+            runInternetPingTest()
+        }
+    }
+
+    // --- HARDWARE CHECKS & DIALOGS ---
+
+    private fun checkHardwareStatus(): Boolean {
+        if (!isWifiEnabled()) {
+            showEnableServiceDialog(
+                "Wi-Fi Required",
+                "Wi-Fi must be ON for this app to function.",
+                Settings.ACTION_WIFI_SETTINGS
+            )
+            return false
+        }
+        if (!isLocationEnabled()) {
+            showEnableServiceDialog(
+                "Location Required",
+                "System Location (GPS) must be ON for Android to allow Wi-Fi Direct/Network discovery.",
+                Settings.ACTION_LOCATION_SOURCE_SETTINGS
+            )
+            return false
+        }
+        return true
+    }
+
+    private fun isWifiEnabled(): Boolean {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        return wifiManager.isWifiEnabled
+    }
+
+    private fun isLocationEnabled(): Boolean {
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+    }
+
+    private fun showEnableServiceDialog(title: String, message: String, settingsAction: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("Go to Settings") { _, _ ->
+                startActivity(Intent(settingsAction))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // --- HOST LOGIC ---
+
+    private fun startHost() {
+        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { createNewGroup() }
+            override fun onFailure(reason: Int) { createNewGroup() }
+        })
+    }
+
+    private fun createNewGroup() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            log("Permission Error: Missing Location")
+            return
+        }
+        manager.createGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { log("Creating Wi-Fi Group...") }
+            override fun onFailure(reason: Int) { log("Error creating group: $reason") }
+        })
     }
 
     private fun stopHost() {
         log("Stopping Host...")
         proxyServer.stop()
-
         manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 log("✓ Wi-Fi Group removed")
@@ -143,12 +178,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         })
     }
 
-    private fun stopVpnService() {
-        log("Stopping VPN Service...")
-        val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
-        stopService(intent)
-        log("✓ VPN stop signal sent")
-    }
+    // --- CLIENT LOGIC ---
 
     private fun prepareVpn(ip: String, port: Int) {
         val intent = VpnService.prepare(this)
@@ -160,7 +190,6 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     }
 
     private fun startVpnService(ip: String, port: Int) {
-        // Use the new tun2socks service
         val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
             putExtra("PROXY_IP", ip)
             putExtra("PROXY_PORT", port)
@@ -170,35 +199,17 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         } else {
             startService(intent)
         }
-        log("VPN Client Starting with tun2socks... Connecting to $ip:$port")
+        log("VPN Client Starting... Connecting to $ip:$port")
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 102 && resultCode == RESULT_OK) {
-            val ip = etIp.text.toString()
-            val port = etPort.text.toString().toInt()
-            startVpnService(ip, port)
-        }
+    private fun stopVpnService() {
+        log("Stopping VPN Service...")
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
+        stopService(intent)
+        log("✓ VPN stop signal sent")
     }
 
-    private fun startHost() {
-        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { createNewGroup() }
-            override fun onFailure(reason: Int) { createNewGroup() }
-        })
-    }
-
-    private fun createNewGroup() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            log("Permission Error")
-            return
-        }
-        manager.createGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { log("Creating Group...") }
-            override fun onFailure(reason: Int) { log("Error: $reason") }
-        })
-    }
+    // --- INTERFACE & LIFECYCLE ---
 
     override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
         if (info != null && info.groupFormed) {
@@ -211,7 +222,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         if (group != null && group.isGroupOwner) {
             proxyServer.start()
             tvHostInfo.text = "SSID: ${group.networkName}\nPASS: ${group.passphrase}\nIP: 192.168.49.1\nPORT: 8080"
-            log("Proxy Running with tun2socks support")
+            log("Proxy Running (SOCKS5)")
         }
     }
 
@@ -236,12 +247,8 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     override fun onPause() {
         super.onPause()
-        try {
-            unregisterReceiver(receiver)
-        } catch (e: IllegalArgumentException) {}
-        try {
-            unregisterReceiver(logReceiver)
-        } catch (e: IllegalArgumentException) {}
+        try { unregisterReceiver(receiver) } catch (e: Exception) {}
+        try { unregisterReceiver(logReceiver) } catch (e: Exception) {}
     }
 
     override fun onDestroy() {
@@ -249,6 +256,8 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         proxyServer.stop()
         manager.removeGroup(channel, null)
     }
+
+    // --- HELPERS ---
 
     private fun checkPermissions() {
         val permissions = mutableListOf(
@@ -273,21 +282,12 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
     private fun testConnectivity(ip: String, port: Int) {
         thread {
             try {
-                DebugUtils.log("Starting connectivity test...")
                 val canConnect = DebugUtils.testProxyConnection(ip, port)
                 runOnUiThread {
-                    if (canConnect) {
-                        Toast.makeText(this, "✓ Can connect to proxy", Toast.LENGTH_SHORT).show()
-                        log("Connectivity test PASSED")
-                    } else {
-                        Toast.makeText(this, "✗ Cannot connect to proxy", Toast.LENGTH_SHORT).show()
-                        log("Connectivity test FAILED")
-                    }
+                    log(if (canConnect) "✓ Connectivity test PASSED" else "✗ Connectivity test FAILED")
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    log("Test error: ${e.message}")
-                }
+                runOnUiThread { log("Test error: ${e.message}") }
             }
         }
     }
@@ -296,51 +296,22 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         log("--- Starting Connectivity Test ---")
         thread {
             try {
-                val host = "8.8.8.8"
-                val port = 53
-                val timeout = 5000
-                val startTime = System.currentTimeMillis()
-
                 val socket = java.net.Socket()
-                socket.connect(java.net.InetSocketAddress(host, port), timeout)
-                val endTime = System.currentTimeMillis()
+                socket.connect(java.net.InetSocketAddress("8.8.8.8", 53), 5000)
                 socket.close()
-
-                log("✓ Internet Reachable: Connected to $host in ${endTime - startTime}ms")
+                log("✓ Internet Reachable (8.8.8.8)")
             } catch (e: Exception) {
                 log("✗ Internet Unreachable: ${e.message}")
-            }
-
-            try {
-                log("Testing DNS resolution (google.com)...")
-                val dnsStart = System.currentTimeMillis()
-                val address = java.net.InetAddress.getByName("google.com")
-                val dnsEnd = System.currentTimeMillis()
-                log("✓ DNS Success: google.com -> ${address.hostAddress} (${dnsEnd - dnsStart}ms)")
-            } catch (e: Exception) {
-                log("✗ DNS Failed: ${e.message}")
             }
         }
     }
 
-    private fun isWifiEnabled(): Boolean {
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        return wifiManager.isWifiEnabled
-    }
-
-    private fun isLocationEnabled(): Boolean {
-        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-    }
-
-    private fun showEnableServiceDialog(title: String, message: String, settingsAction: String) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton("Go to Settings") { _, _ ->
-                startActivity(Intent(settingsAction))
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 102 && resultCode == RESULT_OK) {
+            val ip = etIp.text.toString()
+            val port = etPort.text.toString().toIntOrNull() ?: 8080
+            startVpnService(ip, port)
+        }
     }
 }

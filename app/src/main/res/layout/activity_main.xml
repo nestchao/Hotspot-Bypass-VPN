@@ -7,6 +7,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp"
+    android:background="#F5F5F5"
     tools:context=".MainActivity">
 
     <ScrollView
@@ -26,17 +27,19 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Hotspot Bypass VPN"
-                android:textSize="24sp"
+                android:textSize="26sp"
                 android:textStyle="bold"
+                android:textColor="#333"
+                android:layout_marginTop="16dp"
                 android:layout_marginBottom="24dp"/>
 
             <!-- SECTION 1: HOST (SHARE INTERNET) -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="8dp"
+                app:cardCornerRadius="12dp"
                 app:cardElevation="4dp"
-                android:layout_marginBottom="24dp">
+                android:layout_marginBottom="20dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -49,14 +52,16 @@
                         android:layout_height="wrap_content"
                         android:text="MODE A: HOST (Share Internet)"
                         android:textStyle="bold"
-                        android:textColor="@color/black"
+                        android:textColor="#2196F3"
+                        android:textSize="16sp"
                         android:layout_marginBottom="8dp"/>
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="1. Turn on Mobile Data.\n2. Click Start to create a Wi-Fi Group."
-                        android:textSize="12sp"
+                        android:text="1. Turn on Mobile Data.\n2. Click Start to create a Wi-Fi Group.\n3. Turn on Wi-Fi and Location if asked."
+                        android:textSize="13sp"
+                        android:textColor="#666"
                         android:layout_marginBottom="12dp"/>
 
                     <Button
@@ -64,7 +69,9 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Start Sharing"
-                        android:backgroundTint="#2196F3"/>
+                        android:backgroundTint="#2196F3"
+                        android:textColor="@android:color/white"
+                        android:textStyle="bold"/>
 
                     <Button
                         android:id="@+id/btn_stop_host"
@@ -72,19 +79,20 @@
                         android:layout_height="wrap_content"
                         android:text="Stop Sharing"
                         android:backgroundTint="#F44336"
+                        android:textColor="@android:color/white"
                         android:layout_marginTop="4dp"/>
 
-                    <!-- This text will update with SSID/Pass when you click Start -->
                     <TextView
                         android:id="@+id/tv_host_info"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Status: Stopped"
-                        android:background="#EEE"
-                        android:padding="8dp"
-                        android:layout_marginTop="8dp"
-                        android:fontFamily="monospace"/>
-
+                        android:background="#EEEEEE"
+                        android:padding="12dp"
+                        android:layout_marginTop="12dp"
+                        android:textColor="#444"
+                        android:fontFamily="monospace"
+                        android:textSize="13sp"/>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
@@ -92,8 +100,9 @@
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="8dp"
-                app:cardElevation="4dp">
+                app:cardCornerRadius="12dp"
+                app:cardElevation="4dp"
+                android:layout_marginBottom="20dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -106,32 +115,36 @@
                         android:layout_height="wrap_content"
                         android:text="MODE B: CLIENT (Connect)"
                         android:textStyle="bold"
-                        android:textColor="@color/black"
+                        android:textColor="#4CAF50"
+                        android:textSize="16sp"
                         android:layout_marginBottom="8dp"/>
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="1. Connect to the Host's Wi-Fi manually.\n2. Enter IP Address from Host screen below.\n3. Click Connect to start VPN."
-                        android:textSize="12sp"
+                        android:text="1. Connect to the Host's Wi-Fi manually.\n2. Enter IP and Port from the Host phone.\n3. Turn on Location if asked."
+                        android:textSize="13sp"
+                        android:textColor="#666"
                         android:layout_marginBottom="12dp"/>
 
                     <EditText
                         android:id="@+id/et_host_ip"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="Host IP (e.g., 192.168.49.1)"
+                        android:hint="Host IP (e.g. 192.168.49.1)"
                         android:text="192.168.49.1"
                         android:inputType="text"
-                        android:digits="0123456789." />
+                        android:digits="0123456789."
+                        android:textSize="14sp" />
 
                     <EditText
                         android:id="@+id/et_host_port"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="Port (e.g., 8080)"
+                        android:hint="Port (Default 8080)"
                         android:inputType="number"
-                        android:text="8080"/>
+                        android:text="8080"
+                        android:textSize="14sp" />
 
                     <Button
                         android:id="@+id/btn_connect"
@@ -139,6 +152,8 @@
                         android:layout_height="wrap_content"
                         android:text="Connect &amp; Start VPN"
                         android:backgroundTint="#4CAF50"
+                        android:textColor="@android:color/white"
+                        android:textStyle="bold"
                         android:layout_marginTop="8dp"/>
 
                     <Button
@@ -147,26 +162,38 @@
                         android:layout_height="wrap_content"
                         android:text="Stop VPN"
                         android:backgroundTint="#F44336"
+                        android:textColor="@android:color/white"
                         android:layout_marginTop="4dp"/>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- DEBUG LOGS -->
-            <TextView
-                android:id="@+id/tv_status_log"
+            <!-- DEBUG AREA -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Logs will appear here..."
-                android:layout_marginTop="24dp"
-                android:padding="8dp"
-                android:textColor="#555"/>
+                android:orientation="vertical"
+                android:padding="8dp">
 
-            <Button
-                android:id="@+id/btn_debug"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Debug Test"
-                android:backgroundTint="#FF9800" />
+                <Button
+                    android:id="@+id/btn_debug"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Run Connection Test"
+                    android:backgroundTint="#607D8B"
+                    android:layout_marginBottom="8dp"/>
+
+                <TextView
+                    android:id="@+id/tv_status_log"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Logs will appear here..."
+                    android:padding="12dp"
+                    android:background="#E0E0E0"
+                    android:textColor="#555555"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace"
+                    android:minLines="5"/>
+            </LinearLayout>
 
         </LinearLayout>
     </ScrollView>
