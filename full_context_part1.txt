@@ -554,6 +554,7 @@ import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.net.Uri
 import android.os.PowerManager
+import androidx.compose.ui.platform.LocalContext
 
 // --- DATA CLASS MUST BE DEFINED ---
 data class HostInfo(
@@ -751,6 +752,8 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
 
     @Composable
     fun ClientModeView() {
+//        PrivateDnsWarning()
+
         StatusCard(
             title = "VPN Tunnel",
             isActive = isClientRunning.value,
@@ -812,6 +815,76 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                         Icon(Icons.Default.Stop, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("STOP VPN", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    // In MainActivity.kt
+
+    @Composable
+    fun PrivateDnsWarning() {
+        val context = LocalContext.current
+        val dnsMode = remember { mutableStateOf(getPrivateDnsMode()) }
+
+        // If the mode is "hostname", it means the user set a specific DNS (like dns.google)
+        if (dnsMode.value == "hostname") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                border = BorderStroke(1.dp, Color.Red)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Private DNS Conflict",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Red
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Manual Private DNS detected. This usually blocks hotspot bypass. " +
+                                "Please set it to 'Automatic' or 'Off'.",
+                        fontSize = 13.sp,
+                        color = Color.Black
+                    )
+
+                    // ADDED: Small helper text for manual path
+                    Text(
+                        "Path: Settings > Network > Private DNS",
+                        fontSize = 11.sp,
+                        color = Color.DarkGray,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    TextButton(
+                        onClick = {
+                            // Intent Ladder: Try most specific first, then fall back
+                            val intentSpecific = Intent("android.settings.DNS_SETTINGS")
+                            val intentNetwork = Intent(Settings.ACTION_WIRELESS_SETTINGS) // "Network & Internet"
+                            val intentSettings = Intent(Settings.ACTION_SETTINGS) // General Settings
+
+                            try {
+                                context.startActivity(intentSpecific)
+                            } catch (e: Exception) {
+                                try {
+                                    // Most devices land Private DNS inside Wireless/Network settings
+                                    context.startActivity(intentNetwork)
+                                    Toast.makeText(context, "Look for 'Private DNS' in Advanced settings", Toast.LENGTH_LONG).show()
+                                } catch (e2: Exception) {
+                                    context.startActivity(intentSettings)
+                                }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("FIX IN SETTINGS")
                     }
                 }
             }
@@ -942,10 +1015,30 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
 
     private fun handleConnectClient() {
         if (checkHardwareStatus()) {
+            // 1. Check Battery
             if (!isIgnoringBatteryOptimizations()) {
                 requestIgnoreBatteryOptimizations()
                 return
             }
+
+            // 2. NEW: Check Private DNS
+            if (getPrivateDnsMode() == "hostname") {
+                // Log it so you can see it in debug
+                logState.add("Error: Manual Private DNS detected. Redirecting...")
+
+                // Show a Toast so the user knows WHY they are being moved to settings
+                Toast.makeText(
+                    this,
+                    "Private DNS must be 'Automatic' or 'Off' for VPN to work.",
+                    Toast.LENGTH_LONG
+                ).show()
+
+                // Navigate
+                navigateToPrivateDnsSettings()
+                return // <--- CRITICAL: Exit here so the VPN doesn't try to start
+            }
+
+            // 3. Proceed with VPN if everything is okay
             val ip = clientIp.value
             val port = clientPort.value.toIntOrNull() ?: 8080
             prepareVpn(ip, port)
@@ -1049,6 +1142,31 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         super.onPause()
         try { unregisterReceiver(receiver) } catch (e: Exception) {}
         try { unregisterReceiver(logReceiver) } catch (e: Exception) {}
+    }
+
+    private fun getPrivateDnsMode(): String {
+        return try {
+            Settings.Global.getString(contentResolver, "private_dns_mode") ?: "off"
+        } catch (e: Exception) {
+            "unknown"
+        }
+    }
+
+    private fun navigateToPrivateDnsSettings() {
+        val intentSpecific = Intent("android.settings.DNS_SETTINGS")
+        val intentNetwork = Intent(Settings.ACTION_WIRELESS_SETTINGS)
+        val intentSettings = Intent(Settings.ACTION_SETTINGS)
+
+        try {
+            startActivity(intentSpecific)
+        } catch (e: Exception) {
+            try {
+                startActivity(intentNetwork)
+                Toast.makeText(this, "Go to 'Advanced' -> 'Private DNS'", Toast.LENGTH_LONG).show()
+            } catch (e2: Exception) {
+                startActivity(intentSettings)
+            }
+        }
     }
 }
 

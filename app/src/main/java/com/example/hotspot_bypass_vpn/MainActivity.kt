@@ -42,7 +42,6 @@ import android.net.Uri
 import android.os.PowerManager
 import androidx.compose.ui.platform.LocalContext
 
-// --- DATA CLASS MUST BE DEFINED ---
 data class HostInfo(
     val ssid: String,
     val pass: String,
@@ -57,19 +56,19 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
     private lateinit var receiver: BroadcastReceiver
     private val intentFilter = IntentFilter()
 
-    // --- STATES ---
     private var hostInfoState = mutableStateOf<HostInfo?>(null)
     private var logState = mutableStateListOf<String>()
     private var clientIp = mutableStateOf("192.168.49.1")
     private var clientPort = mutableStateOf("8080")
     private var selectedBand = mutableIntStateOf(1)
     private var selectedTab = mutableIntStateOf(0)
+
+    // --- CRITICAL STATES ---
     private var isHostRunning = mutableStateOf(false)
     private var isClientRunning = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
 
@@ -85,10 +84,11 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             MaterialTheme(
                 colorScheme = lightColorScheme(
                     primary = Color(0xFF6200EE),
-                    secondary = Color(0xFF03DAC5)
+                    secondary = Color(0xFF03DAC5),
+                    error = Color(0xFFB00020)
                 )
             ) {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF8F9FA)) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF0F2F5)) {
                     MainScreen()
                 }
             }
@@ -101,7 +101,12 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Bypass Hotspot VPN", fontWeight = FontWeight.Bold) },
+                    title = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Bypass Hotspot VPN", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            Text("v1.0.4 Stable", fontSize = 10.sp, fontWeight = FontWeight.Light)
+                        }
+                    },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         titleContentColor = Color.White
@@ -110,18 +115,22 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
-                TabRow(selectedTabIndex = selectedTab.intValue) {
+                TabRow(
+                    selectedTabIndex = selectedTab.intValue,
+                    containerColor = Color.White,
+                    contentColor = MaterialTheme.colorScheme.primary
+                ) {
                     Tab(
                         selected = selectedTab.intValue == 0,
                         onClick = { selectedTab.intValue = 0 },
                         text = { Text("Share (Host)") },
-                        icon = { Icon(Icons.Default.Share, contentDescription = null) }
+                        icon = { Icon(Icons.Default.Share, null) }
                     )
                     Tab(
                         selected = selectedTab.intValue == 1,
                         onClick = { selectedTab.intValue = 1 },
                         text = { Text("Connect (Client)") },
-                        icon = { Icon(Icons.Default.SettingsInputAntenna, contentDescription = null) }
+                        icon = { Icon(Icons.Default.VpnLock, null) }
                     )
                 }
 
@@ -140,14 +149,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    var showLogs by remember { mutableStateOf(false) }
-                    TextButton(onClick = { showLogs = !showLogs }) {
-                        Text(if (showLogs) "Hide Debug Logs" else "Show Debug Logs")
-                    }
-
-                    AnimatedVisibility(visible = showLogs) {
-                        LogView()
-                    }
+                    DebugLogSection()
                 }
             }
         }
@@ -159,18 +161,23 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             title = "Hotspot Sharing",
             isActive = isHostRunning.value,
             activeColor = Color(0xFF4CAF50),
-            icon = Icons.Default.CellTower // Changed from CloudUpload
+            icon = Icons.Default.CellTower
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // CONFLICT WARNING: If Client is running, disable Host
+        if (isClientRunning.value) {
+            ConflictCard(message = "VPN Client is currently active. You cannot share while connected to another proxy.")
+        }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(2.dp),
+            elevation = CardDefaults.cardElevation(4.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Sharing Preferences", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Settings", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -178,13 +185,15 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     FilterChip(
                         selected = selectedBand.intValue == 1,
                         onClick = { selectedBand.intValue = 1 },
-                        label = { Text("2.4 GHz") }
+                        label = { Text("2.4 GHz") },
+                        enabled = !isHostRunning.value && !isClientRunning.value
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     FilterChip(
                         selected = selectedBand.intValue == 2,
                         onClick = { selectedBand.intValue = 2 },
-                        label = { Text("5 GHz") }
+                        label = { Text("5 GHz") },
+                        enabled = !isHostRunning.value && !isClientRunning.value
                     )
                 }
 
@@ -194,7 +203,8 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     Button(
                         onClick = { handleStartHost() },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isClientRunning.value // DISABLE IF CLIENT RUNNING
                     ) {
                         Text("START SHARING", fontWeight = FontWeight.Bold)
                     }
@@ -211,21 +221,22 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             }
         }
 
-        AnimatedVisibility(
-            visible = hostInfoState.value != null,
-            enter = expandVertically() + fadeIn()
-        ) {
+        // Show group info if active
+        AnimatedVisibility(visible = hostInfoState.value != null) {
             hostInfoState.value?.let { info ->
                 Spacer(modifier = Modifier.height(16.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                    border = BorderStroke(1.dp, Color(0xFF4CAF50))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Client Setup Info", fontWeight = FontWeight.Bold, color = Color(0xFF1976D2))
-                        Text("Enter these on Phone B:", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(12.dp))
-
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF2E7D32))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Connection Details (Phone B)", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                        }
+                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFFA5D6A7))
                         InfoRow(label = "SSID", value = info.ssid)
                         InfoRow(label = "Password", value = info.pass)
                         InfoRow(label = "Proxy IP", value = info.ip)
@@ -238,20 +249,23 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
 
     @Composable
     fun ClientModeView() {
-//        PrivateDnsWarning()
-
         StatusCard(
             title = "VPN Tunnel",
             isActive = isClientRunning.value,
             activeColor = Color(0xFF2196F3),
-            icon = Icons.Default.VpnLock // Changed from Security
+            icon = Icons.Default.Security
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // CONFLICT WARNING: If Host is running, disable Client
+        if (isHostRunning.value) {
+            ConflictCard(message = "Hotspot Sharing is currently active. You cannot start a VPN while sharing your own connection.")
+        }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(2.dp),
+            elevation = CardDefaults.cardElevation(4.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -263,8 +277,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     onValueChange = { clientIp.value = it },
                     label = { Text("Host IP Address") },
                     modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Lan, contentDescription = null) },
-                    shape = RoundedCornerShape(12.dp)
+                    leadingIcon = { Icon(Icons.Default.Lan, null) },
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !isClientRunning.value && !isHostRunning.value
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -274,8 +289,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     onValueChange = { clientPort.value = it },
                     label = { Text("Port") },
                     modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Numbers, contentDescription = null) },
-                    shape = RoundedCornerShape(12.dp)
+                    leadingIcon = { Icon(Icons.Default.Numbers, null) },
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !isClientRunning.value && !isHostRunning.value
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -284,10 +300,11 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     Button(
                         onClick = { handleConnectClient() },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                        shape = RoundedCornerShape(8.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3)),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isHostRunning.value // DISABLE IF HOST RUNNING
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Icon(Icons.Default.PlayArrow, null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("START VPN", fontWeight = FontWeight.Bold)
                     }
@@ -298,7 +315,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(Icons.Default.Stop, contentDescription = null)
+                        Icon(Icons.Default.Stop, null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("STOP VPN", fontWeight = FontWeight.Bold)
                     }
@@ -307,70 +324,59 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         }
     }
 
-    // In MainActivity.kt
+    @Composable
+    fun ConflictCard(message: String) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+            border = BorderStroke(1.dp, Color.Red)
+        ) {
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(message, fontSize = 13.sp, color = Color(0xFFB71C1C), fontWeight = FontWeight.Medium)
+            }
+        }
+    }
 
     @Composable
-    fun PrivateDnsWarning() {
-        val context = LocalContext.current
-        val dnsMode = remember { mutableStateOf(getPrivateDnsMode()) }
+    fun StatusCard(title: String, isActive: Boolean, activeColor: Color, icon: ImageVector) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
+            label = "alpha"
+        )
 
-        // If the mode is "hostname", it means the user set a specific DNS (like dns.google)
-        if (dnsMode.value == "hostname") {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
-                border = BorderStroke(1.dp, Color.Red)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = if (isActive) activeColor.copy(alpha = 0.05f) else Color.White),
+            border = BorderStroke(if (isActive) 2.dp else 1.dp, if (isActive) activeColor else Color.LightGray)
+        ) {
+            Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(52.dp).background(if (isActive) activeColor else Color(0xFFEEEEEE), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, null, tint = if (isActive) Color.White else Color.Gray, modifier = Modifier.size(28.dp))
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.Black)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red)
+                        Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(if (isActive) activeColor.copy(alpha = alpha) else Color.Gray))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Private DNS Conflict",
+                            text = if (isActive) "SERVICE ACTIVE" else "SERVICE READY",
+                            color = if (isActive) activeColor else Color.Gray,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Red
+                            fontSize = 12.sp,
+                            letterSpacing = 1.sp
                         )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Manual Private DNS detected. This usually blocks hotspot bypass. " +
-                                "Please set it to 'Automatic' or 'Off'.",
-                        fontSize = 13.sp,
-                        color = Color.Black
-                    )
-
-                    // ADDED: Small helper text for manual path
-                    Text(
-                        "Path: Settings > Network > Private DNS",
-                        fontSize = 11.sp,
-                        color = Color.DarkGray,
-                        fontFamily = FontFamily.Monospace
-                    )
-
-                    TextButton(
-                        onClick = {
-                            // Intent Ladder: Try most specific first, then fall back
-                            val intentSpecific = Intent("android.settings.DNS_SETTINGS")
-                            val intentNetwork = Intent(Settings.ACTION_WIRELESS_SETTINGS) // "Network & Internet"
-                            val intentSettings = Intent(Settings.ACTION_SETTINGS) // General Settings
-
-                            try {
-                                context.startActivity(intentSpecific)
-                            } catch (e: Exception) {
-                                try {
-                                    // Most devices land Private DNS inside Wireless/Network settings
-                                    context.startActivity(intentNetwork)
-                                    Toast.makeText(context, "Look for 'Private DNS' in Advanced settings", Toast.LENGTH_LONG).show()
-                                } catch (e2: Exception) {
-                                    context.startActivity(intentSettings)
-                                }
-                            }
-                        },
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Text("FIX IN SETTINGS")
                     }
                 }
             }
@@ -378,54 +384,36 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
     }
 
     @Composable
-    fun StatusCard(title: String, isActive: Boolean, activeColor: Color, icon: ImageVector) {
-        val infiniteTransition = rememberInfiniteTransition(label = "")
-        val alpha by infiniteTransition.animateFloat(
-            initialValue = 0.4f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1000, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse
-            ), label = ""
-        )
+    fun DebugLogSection() {
+        var showLogs by remember { mutableStateOf(false) }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = if (isActive) activeColor.copy(alpha = 0.1f) else Color.White),
-            border = if (isActive) BorderStroke(2.dp, activeColor) else null
-        ) {
-            Row(
-                modifier = Modifier.padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically
+        Column(modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                onClick = { showLogs = !showLogs },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
+                Icon(if (showLogs) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (showLogs) "Hide Debug Logs" else "Show Debug Logs")
+            }
+
+            AnimatedVisibility(visible = showLogs) {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .background(if (isActive) activeColor else Color.LightGray, CircleShape),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .background(Color(0xFF1E1E1E), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
                 ) {
-                    Icon(icon, contentDescription = null, tint = Color.White)
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isActive) activeColor.copy(alpha = alpha) else Color.Gray)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isActive) "ACTIVE" else "IDLE",
-                            color = if (isActive) activeColor else Color.Gray,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 12.sp
-                        )
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        logState.asReversed().forEach { logLine ->
+                            Text(
+                                text = "➜ $logLine",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF00E676)
+                            )
+                        }
                     }
                 }
             }
@@ -436,40 +424,21 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
     fun InfoRow(label: String, value: String) {
         val clipboardManager = LocalClipboardManager.current
         Row(
-            modifier = Modifier.padding(vertical = 4.dp),
+            modifier = Modifier.padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(label, fontSize = 11.sp, color = Color.Gray)
-                Text(value, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                Text(label.uppercase(), fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Text(value, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.DarkGray)
             }
-            IconButton(onClick = {
-                clipboardManager.setText(AnnotatedString(value))
-                Toast.makeText(this@MainActivity, "$label copied", Toast.LENGTH_SHORT).show()
-            }) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-    }
-
-    @Composable
-    fun LogView() {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .background(Color(0xFF212121), RoundedCornerShape(12.dp))
-                .padding(8.dp)
-        ) {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                logState.asReversed().forEach { logLine ->
-                    Text(
-                        text = "> $logLine",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF00FF00)
-                    )
-                }
+            IconButton(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(value))
+                    Toast.makeText(this@MainActivity, "$label copied", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.background(Color(0xFFF5F5F5), CircleShape).size(36.dp)
+            ) {
+                Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -489,6 +458,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                 startService(intent)
             }
             isHostRunning.value = true
+            logState.add("Starting Host Service...")
         }
     }
 
@@ -497,34 +467,16 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         startService(intent)
         hostInfoState.value = null
         isHostRunning.value = false
+        logState.add("Host Service Stopped.")
     }
 
     private fun handleConnectClient() {
         if (checkHardwareStatus()) {
-            // 1. Check Battery
-            if (!isIgnoringBatteryOptimizations()) {
-                requestIgnoreBatteryOptimizations()
+            if (getPrivateDnsMode() == "hostname") {
+                Toast.makeText(this, "Disable Private DNS first!", Toast.LENGTH_LONG).show()
+                navigateToPrivateDnsSettings()
                 return
             }
-
-            // 2. NEW: Check Private DNS
-            if (getPrivateDnsMode() == "hostname") {
-                // Log it so you can see it in debug
-                logState.add("Error: Manual Private DNS detected. Redirecting...")
-
-                // Show a Toast so the user knows WHY they are being moved to settings
-                Toast.makeText(
-                    this,
-                    "Private DNS must be 'Automatic' or 'Off' for VPN to work.",
-                    Toast.LENGTH_LONG
-                ).show()
-
-                // Navigate
-                navigateToPrivateDnsSettings()
-                return // <--- CRITICAL: Exit here so the VPN doesn't try to start
-            }
-
-            // 3. Proceed with VPN if everything is okay
             val ip = clientIp.value
             val port = clientPort.value.toIntOrNull() ?: 8080
             prepareVpn(ip, port)
@@ -537,6 +489,22 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         }
         startService(intent)
         isClientRunning.value = false
+        logState.add("VPN Client Stopped.")
+    }
+
+    // Existing helper methods below (unchanged logic, just ensuring state sync)
+    private fun startVpnService(ip: String, port: Int) {
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+            putExtra("PROXY_IP", ip)
+            putExtra("PROXY_PORT", port)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        isClientRunning.value = true
+        logState.add("VPN Client Starting...")
     }
 
     override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
@@ -598,17 +566,11 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         }
     }
 
-    private fun startVpnService(ip: String, port: Int) {
-        val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
-            putExtra("PROXY_IP", ip)
-            putExtra("PROXY_PORT", port)
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 102 && resultCode == RESULT_OK) {
+            startVpnService(clientIp.value, clientPort.value.toIntOrNull() ?: 8080)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-        isClientRunning.value = true
     }
 
     private val logReceiver = object : BroadcastReceiver() {
@@ -633,25 +595,15 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
     private fun getPrivateDnsMode(): String {
         return try {
             Settings.Global.getString(contentResolver, "private_dns_mode") ?: "off"
-        } catch (e: Exception) {
-            "unknown"
-        }
+        } catch (e: Exception) { "unknown" }
     }
 
     private fun navigateToPrivateDnsSettings() {
-        val intentSpecific = Intent("android.settings.DNS_SETTINGS")
-        val intentNetwork = Intent(Settings.ACTION_WIRELESS_SETTINGS)
-        val intentSettings = Intent(Settings.ACTION_SETTINGS)
-
+        val intent = Intent(Settings.ACTION_SETTINGS)
         try {
-            startActivity(intentSpecific)
+            startActivity(Intent("android.settings.DNS_SETTINGS"))
         } catch (e: Exception) {
-            try {
-                startActivity(intentNetwork)
-                Toast.makeText(this, "Go to 'Advanced' -> 'Private DNS'", Toast.LENGTH_LONG).show()
-            } catch (e2: Exception) {
-                startActivity(intentSettings)
-            }
+            startActivity(intent)
         }
     }
 }
