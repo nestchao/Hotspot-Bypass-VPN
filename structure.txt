@@ -19,6 +19,3 @@
                 - Myvpnservicetun2socks.kt
                 - ProxyServer.kt
                 - WiFiDirectBroadcastReceiver.kt
-        [DIR] res/
-          [DIR] layout/
-            - activity_main.xml

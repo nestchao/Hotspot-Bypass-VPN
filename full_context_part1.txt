@@ -3,10 +3,11 @@
 FILE: build.gradle.kts
 ============================================================
 
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.kotlin.android) apply false
+    // ADD THIS LINE:
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
 ============================================================
@@ -40,6 +41,7 @@ FILE: app\build.gradle.kts
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -78,6 +80,10 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+
+    buildFeatures {
+        compose = true
+    }
 }
 
 dependencies {
@@ -96,8 +102,14 @@ dependencies {
     // Local AAR library - tun2socks
     implementation(files("libs/tun2socks-1.0.4.aar"))
 
-    // Alternative libbox (if you want to keep it as backup)
-    // implementation("io.nekohasekai:libbox:1.8.0")
+    val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.activity:activity-compose:1.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("androidx.compose.material:material-icons-extended")
 }
 
 ============================================================
@@ -124,6 +136,7 @@ FILE: app\src\main\AndroidManifest.xml
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:allowBackup="true"
@@ -172,12 +185,18 @@ FILE: app\src\main\AndroidManifest.xml
                 android:value="VPN proxy for hotspot bypass" />
         </service>
 
+        <!-- In AndroidManifest.xml -->
         <service
             android:name=".HostService"
             android:enabled="true"
             android:exported="false"
             android:process=":proxy"
-            android:foregroundServiceType="specialUse" />
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Proxy server and Wi-Fi Direct host" />
+        </service>
     </application>
 
 </manifest>
@@ -333,12 +352,11 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
+import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.*
 import androidx.core.app.NotificationCompat
-import android.net.wifi.p2p.WifiP2pConfig
 import android.util.Log
-import android.os.Build
 
 class HostService : Service() {
 
@@ -348,13 +366,12 @@ class HostService : Service() {
 
     private lateinit var p2pManager: WifiP2pManager
     private lateinit var p2pChannel: WifiP2pManager.Channel
-
-    private var preferredBand = 1
+    private var preferredBand = 1 // 1 for 2.4GHz, 2 for 5GHz
 
     override fun onCreate() {
         super.onCreate()
         p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
-        p2pChannel = p2pManager.initialize(this, mainLooper, null)
+        p2pChannel = p2pManager.initialize(applicationContext, mainLooper, null)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -363,11 +380,10 @@ class HostService : Service() {
             return START_NOT_STICKY
         }
 
-        // Get the band from intent (default to 1 which is 2.4GHz)
+        // Get the band preference from MainActivity
         preferredBand = intent?.getIntExtra("WIFI_BAND", 1) ?: 1
-        Log.d("HostService", "⚡ Starting with band preference: $preferredBand (${if(preferredBand == 1) "2.4GHz" else "5GHz"})")
 
-        startForeground(2, createNotification("Initializing Wi-Fi Group..."))
+        startForeground(2, createNotification("Host is active with custom password"))
         acquireLocks()
 
         if (proxyServer == null) {
@@ -376,145 +392,70 @@ class HostService : Service() {
         }
 
         setupWifiDirectGroup()
+
         return START_STICKY
     }
 
     @SuppressLint("MissingPermission")
     private fun setupWifiDirectGroup() {
-        // Remove existing group first to ensure a clean start
+        // First, remove any existing group to avoid "Busy" errors
         p2pManager.removeGroup(p2pChannel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
-                Log.d("HostService", "✓ Old group removed, creating new one...")
-                Thread.sleep(500) // Small delay to ensure clean state
-                createGroup()
+                createGroupWithPassword()
             }
             override fun onFailure(reason: Int) {
-                Log.d("HostService", "No existing group to remove (reason: $reason), creating new one...")
-                createGroup()
+                // If no group exists, just create the new one
+                createGroupWithPassword()
             }
         })
     }
 
     @SuppressLint("MissingPermission")
-    private fun createGroup() {
-        val config = WifiP2pConfig()
-        config.groupOwnerIntent = 15 // Force this phone to be the boss
-
-        // 1. Logic for Android 10 (API 29) and above
+    private fun createGroupWithPassword() {
+        // Use the Builder to set the specific password (Android 10+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                // Method 1: Try to set groupOwnerBand (preferred method)
-                try {
-                    val bandField = config.javaClass.getField("groupOwnerBand")
-                    bandField.set(config, preferredBand)
-                    Log.d("HostService", "✓ Set groupOwnerBand to $preferredBand (${if(preferredBand == 1) "2.4GHz" else "5GHz"})")
-                } catch (e: Exception) {
-                    Log.w("HostService", "groupOwnerBand field not found: ${e.message}")
-                }
+                // 2437MHz = 2.4GHz Channel 6 | 5180MHz = 5GHz Channel 36
+                val frequency = if (preferredBand == 1) 2437 else 5180
 
-                // Method 2: Try to set network name with band hint
-                try {
-                    val netNameField = config.javaClass.getDeclaredField("mNetworkName")
-                    netNameField.isAccessible = true
-                    val bandSuffix = if (preferredBand == 1) "_24G" else "_5G"
-                    netNameField.set(config, "DIRECT-${bandSuffix}")
-                    Log.d("HostService", "✓ Set network name with band hint: $bandSuffix")
-                } catch (e: Exception) {
-                    Log.w("HostService", "mNetworkName field not available: ${e.message}")
-                }
+                val config = WifiP2pConfig.Builder()
+                    .setNetworkName("DIRECT-HotspotBypass")
+                    .setPassphrase("87654321") // <--- YOUR NEW PASSWORD
+                    .setGroupOperatingFrequency(frequency)
+                    .build()
 
-                // Method 3: ONLY set frequency if we're on 2.4GHz (more reliable)
-                if (preferredBand == 1) {
-                    try {
-                        val freqField = config.javaClass.getDeclaredField("groupOwnerFrequency")
-                        freqField.isAccessible = true
-                        // Use a different 2.4GHz channel (try channel 6 = 2437MHz)
-                        // Some devices work better with channel 6 or 11
-                        freqField.set(config, 2437) // 2.4GHz Channel 6
-                        Log.d("HostService", "✓ Forced Frequency to 2437MHz (Channel 6, 2.4GHz)")
-                    } catch (e: Exception) {
-                        Log.w("HostService", "Could not set frequency: ${e.message}")
+                p2pManager.createGroup(p2pChannel, config, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        updateNotification("✓ Sharing Active | Pass: 87654321")
                     }
-                }
-
+                    override fun onFailure(reason: Int) {
+                        Log.e("HostService", "Config Group failed ($reason), trying legacy...")
+                        createLegacyGroup()
+                    }
+                })
+                return
             } catch (e: Exception) {
-                Log.e("HostService", "Band configuration error: ${e.message}")
+                Log.e("HostService", "Builder error: ${e.message}")
             }
-
-            // Call the API 29+ version of createGroup
-            p2pManager.createGroup(p2pChannel, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Log.d("HostService", "✓ Group creation SUCCESS, checking actual frequency...")
-                    // Wait a moment for the group to fully initialize
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        checkActualGroupFrequency()
-                    }, 1000)
-                }
-                override fun onFailure(reason: Int) {
-                    Log.e("HostService", "✗ Group creation FAILED with reason: $reason")
-                    val errorMsg = when(reason) {
-                        0 -> "Internal error"
-                        1 -> "P2P unsupported"
-                        2 -> "Busy"
-                        else -> "Unknown error ($reason)"
-                    }
-                    updateNotification("Failed: $errorMsg")
-                }
-            })
-
-        } else {
-            // 2. Logic for Android 7.0 to Android 9.0 (API 24-28)
-            // These versions DO NOT support setting a band via code.
-            Log.w("HostService", "⚠ Android < 10: Band selection not supported")
-            p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    updateNotification("Sharing Active (Auto Band)")
-                }
-                override fun onFailure(reason: Int) {
-                    updateNotification("Failed to start group (Legacy): $reason")
-                }
-            })
         }
+        createLegacyGroup()
     }
 
     @SuppressLint("MissingPermission")
-    private fun checkActualGroupFrequency() {
-        p2pManager.requestGroupInfo(p2pChannel) { group ->
-            if (group != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val freq = group.frequency
-                    val band = if (freq > 4000) "5GHz" else "2.4GHz"
-                    val bandEmoji = if (freq > 4000) "⚠️" else "✓"
-
-                    Log.d("HostService", "═══════════════════════════════")
-                    Log.d("HostService", "$bandEmoji ACTUAL OPERATING BAND: $band")
-                    Log.d("HostService", "   Frequency: $freq MHz")
-                    Log.d("HostService", "   Expected: ${if(preferredBand == 1) "2.4GHz" else "5GHz"}")
-                    Log.d("HostService", "═══════════════════════════════")
-
-                    if ((preferredBand == 1 && freq > 4000) || (preferredBand == 2 && freq < 4000)) {
-                        Log.w("HostService", "⚠️ WARNING: Band mismatch detected!")
-                        updateNotification("⚠️ Active: $band (Expected: ${if(preferredBand == 1) "2.4GHz" else "5GHz"})")
-                    } else {
-                        updateNotification("✓ Sharing Active: $band")
-                    }
-                } else {
-                    updateNotification("Sharing Active")
-                }
+    private fun createLegacyGroup() {
+        p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                updateNotification("✓ Sharing Active (Auto Password)")
             }
-        }
+            override fun onFailure(reason: Int) {
+                updateNotification("✗ Failed to create group")
+            }
+        })
     }
 
-    private fun handleGroupSuccess() {
-        val bandName = if (preferredBand == 2 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "5GHz" else "2.4GHz/Auto"
-        updateNotification("Sharing Active ($bandName)")
-        sendBroadcast(Intent("HOST_STATS_UPDATE").putExtra("status", "Running"))
-    }
-
-    private fun stopGroupAndService() {
-        p2pManager.removeGroup(p2pChannel, null)
-        proxyServer?.stop()
-        stopSelf()
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Keeps service alive when swiped away
+        Log.d("HostService", "App swiped, service continuing...")
     }
 
     private fun createNotification(content: String): Notification {
@@ -528,11 +469,11 @@ class HostService : Service() {
         val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Hotspot Bypass: Host Active")
+            .setContentTitle("Hotspot Bypass Host")
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Sharing", stopPendingIntent)
             .build()
     }
 
@@ -542,22 +483,20 @@ class HostService : Service() {
     }
 
     private fun acquireLocks() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BypassVPN::HostWakeLock")
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BypassVPN::HostWakeLock")
         wakeLock?.acquire()
 
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BypassVPN::WifiLock")
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BypassVPN::WifiLock")
         wifiLock?.acquire()
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // This keeps the service alive when swiped away
-        val restartServiceIntent = Intent(applicationContext, this.javaClass).also { it.setPackage(packageName) }
-        val restartServicePendingIntent = PendingIntent.getService(this, 1, restartServiceIntent, PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE)
-        val alarmService = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmService.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 1000, restartServicePendingIntent)
-        super.onTaskRemoved(rootIntent)
+    private fun stopGroupAndService() {
+        p2pManager.removeGroup(p2pChannel, null)
+        proxyServer?.stop()
+        stopForeground(true)
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -576,201 +515,593 @@ FILE: app\src\main\java\com\example\hotspot_bypass_vpn\MainActivity.kt
 package com.example.hotspot_bypass_vpn
 
 import android.Manifest
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.content.pm.PackageManager
-import android.location.LocationManager
+import android.content.*
 import android.net.VpnService
-import android.net.wifi.WifiManager
-import android.net.wifi.p2p.WifiP2pGroup
-import android.net.wifi.p2p.WifiP2pInfo
-import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Button
-import android.widget.EditText
-import android.widget.RadioGroup
-import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import kotlin.concurrent.thread
+import android.net.wifi.p2p.WifiP2pGroup
+import android.net.wifi.p2p.WifiP2pInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.net.Uri
+import android.os.PowerManager
+import androidx.compose.ui.platform.LocalContext
 
-class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener {
+// --- DATA CLASS MUST BE DEFINED ---
+data class HostInfo(
+    val ssid: String,
+    val pass: String,
+    val ip: String,
+    val port: String
+)
 
-    private val proxyServer = ProxyServer()
+class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener {
+
     private lateinit var manager: WifiP2pManager
     private lateinit var channel: WifiP2pManager.Channel
     private lateinit var receiver: BroadcastReceiver
     private val intentFilter = IntentFilter()
 
-    private lateinit var tvHostInfo: TextView
-    private lateinit var tvStatusLog: TextView
-    private lateinit var etIp: EditText
-    private lateinit var etPort: EditText
+    // --- STATES ---
+    private var hostInfoState = mutableStateOf<HostInfo?>(null)
+    private var logState = mutableStateListOf<String>()
+    private var clientIp = mutableStateOf("192.168.49.1")
+    private var clientPort = mutableStateOf("8080")
+    private var selectedBand = mutableIntStateOf(1)
+    private var selectedTab = mutableIntStateOf(0)
+    private var isHostRunning = mutableStateOf(false)
+    private var isClientRunning = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
-        // UI Initialization
-        val btnStartHost = findViewById<Button>(R.id.btn_start_host)
-        val btnStopHost = findViewById<Button>(R.id.btn_stop_host)
-        val btnConnect = findViewById<Button>(R.id.btn_connect)
-        val btnStopClient = findViewById<Button>(R.id.btn_stop_client)
-        val btnDebug = findViewById<Button>(R.id.btn_debug)
-        tvHostInfo = findViewById(R.id.tv_host_info)
-        tvStatusLog = findViewById(R.id.tv_status_log)
-        etIp = findViewById(R.id.et_host_ip)
-        etPort = findViewById(R.id.et_host_port)
-
-        // Wi-Fi Direct Initialization
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
 
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+        intentFilter.apply {
+            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+        }
 
         checkPermissions()
 
-        // --- BUTTON LOGIC ---
-
-        btnStartHost.setOnClickListener {
-            if (checkHardwareStatus()) {
-                val rgBand = findViewById<RadioGroup>(R.id.rg_band)
-                // 1 = 2.4GHz, 2 = 5GHz (Matching WifiP2pConfig constants)
-                val selectedBand = if (rgBand.checkedRadioButtonId == R.id.rb_5ghz) 2 else 1
-
-                startHost(selectedBand)
-            }
-        }
-
-
-        btnStopHost.setOnClickListener {
-            stopHost()
-        }
-
-        btnConnect.setOnClickListener {
-            if (checkHardwareStatus()) {
-                val ip = etIp.text.toString()
-                val portStr = etPort.text.toString()
-
-                if (ip.isEmpty() || portStr.isEmpty()) {
-                    Toast.makeText(this, "Please enter IP and Port", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
+        setContent {
+            MaterialTheme(
+                colorScheme = lightColorScheme(
+                    primary = Color(0xFF6200EE),
+                    secondary = Color(0xFF03DAC5)
+                )
+            ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF8F9FA)) {
+                    MainScreen()
                 }
-
-                val port = portStr.toIntOrNull() ?: 8080
-                testConnectivity(ip, port)
-                prepareVpn(ip, port)
             }
-        }
-
-        btnStopClient.setOnClickListener {
-            log("Requesting VPN Stop...")
-            val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
-                action = "com.example.hotspot_bypass_vpn.STOP" // Match the string in the Service
-            }
-            // We start it as a service with the STOP action
-            startService(intent)
-        }
-
-        btnDebug.setOnClickListener {
-            runInternetPingTest()
         }
     }
 
-    // --- HARDWARE CHECKS & DIALOGS ---
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun MainScreen() {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("Bypass Hotspot VPN", fontWeight = FontWeight.Bold) },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        titleContentColor = Color.White
+                    )
+                )
+            }
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding)) {
+                TabRow(selectedTabIndex = selectedTab.intValue) {
+                    Tab(
+                        selected = selectedTab.intValue == 0,
+                        onClick = { selectedTab.intValue = 0 },
+                        text = { Text("Share (Host)") },
+                        icon = { Icon(Icons.Default.Share, contentDescription = null) }
+                    )
+                    Tab(
+                        selected = selectedTab.intValue == 1,
+                        onClick = { selectedTab.intValue = 1 },
+                        text = { Text("Connect (Client)") },
+                        icon = { Icon(Icons.Default.SettingsInputAntenna, contentDescription = null) }
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (selectedTab.intValue == 0) {
+                        HostModeView()
+                    } else {
+                        ClientModeView()
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    var showLogs by remember { mutableStateOf(false) }
+                    TextButton(onClick = { showLogs = !showLogs }) {
+                        Text(if (showLogs) "Hide Debug Logs" else "Show Debug Logs")
+                    }
+
+                    AnimatedVisibility(visible = showLogs) {
+                        LogView()
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun HostModeView() {
+        StatusCard(
+            title = "Hotspot Sharing",
+            isActive = isHostRunning.value,
+            activeColor = Color(0xFF4CAF50),
+            icon = Icons.Default.CellTower // Changed from CloudUpload
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(2.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Sharing Preferences", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Wi-Fi Band:", modifier = Modifier.weight(1f))
+                    FilterChip(
+                        selected = selectedBand.intValue == 1,
+                        onClick = { selectedBand.intValue = 1 },
+                        label = { Text("2.4 GHz") }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FilterChip(
+                        selected = selectedBand.intValue == 2,
+                        onClick = { selectedBand.intValue = 2 },
+                        label = { Text("5 GHz") }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (!isHostRunning.value) {
+                    Button(
+                        onClick = { handleStartHost() },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("START SHARING", fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Button(
+                        onClick = { handleStopHost() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("STOP SHARING", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = hostInfoState.value != null,
+            enter = expandVertically() + fadeIn()
+        ) {
+            hostInfoState.value?.let { info ->
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Client Setup Info", fontWeight = FontWeight.Bold, color = Color(0xFF1976D2))
+                        Text("Enter these on Phone B:", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        InfoRow(label = "SSID", value = info.ssid)
+                        InfoRow(label = "Password", value = info.pass)
+                        InfoRow(label = "Proxy IP", value = info.ip)
+                        InfoRow(label = "Proxy Port", value = info.port)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun ClientModeView() {
+//        PrivateDnsWarning()
+
+        StatusCard(
+            title = "VPN Tunnel",
+            isActive = isClientRunning.value,
+            activeColor = Color(0xFF2196F3),
+            icon = Icons.Default.VpnLock // Changed from Security
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(2.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Connection Details", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = clientIp.value,
+                    onValueChange = { clientIp.value = it },
+                    label = { Text("Host IP Address") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Lan, contentDescription = null) },
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = clientPort.value,
+                    onValueChange = { clientPort.value = it },
+                    label = { Text("Port") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Numbers, contentDescription = null) },
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (!isClientRunning.value) {
+                    Button(
+                        onClick = { handleConnectClient() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("START VPN", fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Button(
+                        onClick = { handleStopClient() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("STOP VPN", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    // In MainActivity.kt
+
+    @Composable
+    fun PrivateDnsWarning() {
+        val context = LocalContext.current
+        val dnsMode = remember { mutableStateOf(getPrivateDnsMode()) }
+
+        // If the mode is "hostname", it means the user set a specific DNS (like dns.google)
+        if (dnsMode.value == "hostname") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                border = BorderStroke(1.dp, Color.Red)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Private DNS Conflict",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Red
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Manual Private DNS detected. This usually blocks hotspot bypass. " +
+                                "Please set it to 'Automatic' or 'Off'.",
+                        fontSize = 13.sp,
+                        color = Color.Black
+                    )
+
+                    // ADDED: Small helper text for manual path
+                    Text(
+                        "Path: Settings > Network > Private DNS",
+                        fontSize = 11.sp,
+                        color = Color.DarkGray,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    TextButton(
+                        onClick = {
+                            // Intent Ladder: Try most specific first, then fall back
+                            val intentSpecific = Intent("android.settings.DNS_SETTINGS")
+                            val intentNetwork = Intent(Settings.ACTION_WIRELESS_SETTINGS) // "Network & Internet"
+                            val intentSettings = Intent(Settings.ACTION_SETTINGS) // General Settings
+
+                            try {
+                                context.startActivity(intentSpecific)
+                            } catch (e: Exception) {
+                                try {
+                                    // Most devices land Private DNS inside Wireless/Network settings
+                                    context.startActivity(intentNetwork)
+                                    Toast.makeText(context, "Look for 'Private DNS' in Advanced settings", Toast.LENGTH_LONG).show()
+                                } catch (e2: Exception) {
+                                    context.startActivity(intentSettings)
+                                }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("FIX IN SETTINGS")
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun StatusCard(title: String, isActive: Boolean, activeColor: Color, icon: ImageVector) {
+        val infiniteTransition = rememberInfiniteTransition(label = "")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.4f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ), label = ""
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = if (isActive) activeColor.copy(alpha = 0.1f) else Color.White),
+            border = if (isActive) BorderStroke(2.dp, activeColor) else null
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(if (isActive) activeColor else Color.LightGray, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = Color.White)
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isActive) activeColor.copy(alpha = alpha) else Color.Gray)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isActive) "ACTIVE" else "IDLE",
+                            color = if (isActive) activeColor else Color.Gray,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun InfoRow(label: String, value: String) {
+        val clipboardManager = LocalClipboardManager.current
+        Row(
+            modifier = Modifier.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontSize = 11.sp, color = Color.Gray)
+                Text(value, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+            IconButton(onClick = {
+                clipboardManager.setText(AnnotatedString(value))
+                Toast.makeText(this@MainActivity, "$label copied", Toast.LENGTH_SHORT).show()
+            }) {
+                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+
+    @Composable
+    fun LogView() {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(Color(0xFF212121), RoundedCornerShape(12.dp))
+                .padding(8.dp)
+        ) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                logState.asReversed().forEach { logLine ->
+                    Text(
+                        text = "> $logLine",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF00FF00)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun handleStartHost() {
+        if (checkHardwareStatus()) {
+            if (!isIgnoringBatteryOptimizations()) {
+                requestIgnoreBatteryOptimizations()
+                return
+            }
+            val intent = Intent(this, HostService::class.java).apply {
+                putExtra("WIFI_BAND", selectedBand.intValue)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            isHostRunning.value = true
+        }
+    }
+
+    private fun handleStopHost() {
+        val intent = Intent(this, HostService::class.java).apply { action = "STOP" }
+        startService(intent)
+        hostInfoState.value = null
+        isHostRunning.value = false
+    }
+
+    private fun handleConnectClient() {
+        if (checkHardwareStatus()) {
+            // 1. Check Battery
+            if (!isIgnoringBatteryOptimizations()) {
+                requestIgnoreBatteryOptimizations()
+                return
+            }
+
+            // 2. NEW: Check Private DNS
+            if (getPrivateDnsMode() == "hostname") {
+                // Log it so you can see it in debug
+                logState.add("Error: Manual Private DNS detected. Redirecting...")
+
+                // Show a Toast so the user knows WHY they are being moved to settings
+                Toast.makeText(
+                    this,
+                    "Private DNS must be 'Automatic' or 'Off' for VPN to work.",
+                    Toast.LENGTH_LONG
+                ).show()
+
+                // Navigate
+                navigateToPrivateDnsSettings()
+                return // <--- CRITICAL: Exit here so the VPN doesn't try to start
+            }
+
+            // 3. Proceed with VPN if everything is okay
+            val ip = clientIp.value
+            val port = clientPort.value.toIntOrNull() ?: 8080
+            prepareVpn(ip, port)
+        }
+    }
+
+    private fun handleStopClient() {
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+            action = MyVpnServiceTun2Socks.ACTION_STOP
+        }
+        startService(intent)
+        isClientRunning.value = false
+    }
+
+    override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
+        if (info != null && info.groupFormed) {
+            isHostRunning.value = true
+        }
+    }
+
+    fun updateGroupInfo(group: WifiP2pGroup?) {
+        if (group != null && group.isGroupOwner) {
+            hostInfoState.value = HostInfo(
+                ssid = group.networkName ?: "Unknown",
+                pass = group.passphrase ?: "N/A",
+                ip = "192.168.49.1",
+                port = "8080"
+            )
+            isHostRunning.value = true
+        }
+    }
+
+    private fun checkPermissions() {
+        val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CHANGE_WIFI_STATE, Manifest.permission.ACCESS_WIFI_STATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
+    }
 
     private fun checkHardwareStatus(): Boolean {
-        if (!isWifiEnabled()) {
-            showEnableServiceDialog(
-                "Wi-Fi Required",
-                "Wi-Fi must be ON for this app to function.",
-                Settings.ACTION_WIFI_SETTINGS
-            )
-            return false
-        }
-        if (!isLocationEnabled()) {
-            showEnableServiceDialog(
-                "Location Required",
-                "System Location (GPS) must be ON for Android to allow Wi-Fi Direct/Network discovery.",
-                Settings.ACTION_LOCATION_SOURCE_SETTINGS
-            )
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        if (!wifiManager.isWifiEnabled) {
+            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
             return false
         }
         return true
     }
 
-    private fun isWifiEnabled(): Boolean {
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        return wifiManager.isWifiEnabled
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } else true
     }
 
-    private fun isLocationEnabled(): Boolean {
-        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-    }
-
-    private fun showEnableServiceDialog(title: String, message: String, settingsAction: String) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton("Go to Settings") { _, _ ->
-                startActivity(Intent(settingsAction))
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun startHost(band: Int) {
-        val intent = Intent(this, HostService::class.java).apply {
-            putExtra("WIFI_BAND", band)
+    private fun requestIgnoreBatteryOptimizations() {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-        log("Host Service starting (${if(band == 2) "5GHz" else "2.4GHz"})...")
+        startActivity(intent)
     }
-
-    // --- HOST LOGIC ---
-
-    private fun startHost() {
-        val intent = Intent(this, HostService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-        log("Host Service starting in dedicated process...")
-    }
-
-    private fun createNewGroup() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            log("Permission Error: Missing Location")
-            return
-        }
-        manager.createGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { log("Creating Wi-Fi Group...") }
-            override fun onFailure(reason: Int) { log("Error creating group: $reason") }
-        })
-    }
-
-    private fun stopHost() {
-        val intent = Intent(this, HostService::class.java).apply { action = "STOP" }
-        startService(intent)
-        log("Host Service stopping...")
-    }
-    // --- CLIENT LOGIC ---
 
     private fun prepareVpn(ip: String, port: Int) {
         val intent = VpnService.prepare(this)
@@ -791,38 +1122,12 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         } else {
             startService(intent)
         }
-        log("VPN Client Starting... Connecting to $ip:$port")
-    }
-
-    private fun stopVpnService() {
-        log("Stopping VPN Service...")
-        val intent = Intent(this, MyVpnServiceTun2Socks::class.java)
-        stopService(intent)
-        log("✓ VPN stop signal sent")
-    }
-
-    // --- INTERFACE & LIFECYCLE ---
-
-    override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
-        if (info != null && info.groupFormed) {
-            val hostIp = info.groupOwnerAddress?.hostAddress ?: "192.168.49.1"
-            log("NETWORK ACTIVE. Host IP: $hostIp")
-        }
-    }
-
-    fun updateGroupInfo(group: WifiP2pGroup?) {
-        if (group != null && group.isGroupOwner) {
-            // We don't call proxyServer.start() here anymore,
-            // the HostService handles it.
-            tvHostInfo.text = "SSID: ${group.networkName}\nPASS: ${group.passphrase}\nIP: 192.168.49.1\nPORT: 8080"
-            log("Proxy Service running in background")
-        }
+        isClientRunning.value = true
     }
 
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val message = intent?.getStringExtra("message") ?: ""
-            log(message)
+            intent?.getStringExtra("message")?.let { logState.add(it) }
         }
     }
 
@@ -830,12 +1135,7 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         super.onResume()
         receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
         registerReceiver(receiver, intentFilter)
-        ContextCompat.registerReceiver(
-            this,
-            logReceiver,
-            IntentFilter("VPN_LOG"),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
+        ContextCompat.registerReceiver(this, logReceiver, IntentFilter("VPN_LOG"), ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     override fun onPause() {
@@ -844,67 +1144,28 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
         try { unregisterReceiver(logReceiver) } catch (e: Exception) {}
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        proxyServer.stop()
-        manager.removeGroup(channel, null)
-    }
-
-    // --- HELPERS ---
-
-    private fun checkPermissions() {
-        val permissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.CHANGE_WIFI_STATE,
-            Manifest.permission.ACCESS_WIFI_STATE
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
-    }
-
-    private fun log(message: String) {
-        runOnUiThread {
-            val currentText = tvStatusLog.text.toString()
-            tvStatusLog.text = "$message\n$currentText"
+    private fun getPrivateDnsMode(): String {
+        return try {
+            Settings.Global.getString(contentResolver, "private_dns_mode") ?: "off"
+        } catch (e: Exception) {
+            "unknown"
         }
     }
 
-    private fun testConnectivity(ip: String, port: Int) {
-        thread {
+    private fun navigateToPrivateDnsSettings() {
+        val intentSpecific = Intent("android.settings.DNS_SETTINGS")
+        val intentNetwork = Intent(Settings.ACTION_WIRELESS_SETTINGS)
+        val intentSettings = Intent(Settings.ACTION_SETTINGS)
+
+        try {
+            startActivity(intentSpecific)
+        } catch (e: Exception) {
             try {
-                val canConnect = DebugUtils.testProxyConnection(ip, port)
-                runOnUiThread {
-                    log(if (canConnect) "✓ Connectivity test PASSED" else "✗ Connectivity test FAILED")
-                }
-            } catch (e: Exception) {
-                runOnUiThread { log("Test error: ${e.message}") }
+                startActivity(intentNetwork)
+                Toast.makeText(this, "Go to 'Advanced' -> 'Private DNS'", Toast.LENGTH_LONG).show()
+            } catch (e2: Exception) {
+                startActivity(intentSettings)
             }
-        }
-    }
-
-    private fun runInternetPingTest() {
-        log("--- Starting Connectivity Test ---")
-        thread {
-            try {
-                val socket = java.net.Socket()
-                socket.connect(java.net.InetSocketAddress("8.8.8.8", 53), 5000)
-                socket.close()
-                log("✓ Internet Reachable (8.8.8.8)")
-            } catch (e: Exception) {
-                log("✗ Internet Unreachable: ${e.message}")
-            }
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 102 && resultCode == RESULT_OK) {
-            val ip = etIp.text.toString()
-            val port = etPort.text.toString().toIntOrNull() ?: 8080
-            startVpnService(ip, port)
         }
     }
 }
@@ -2813,242 +3074,3 @@ class WiFiDirectBroadcastReceiver(
         }
     }
 }
-
-============================================================
-FILE: app\src\main\res\layout\activity_main.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/main"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:padding="16dp"
-    android:background="#F5F5F5"
-    tools:context=".MainActivity">
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal">
-
-            <!-- APP TITLE -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Hotspot Bypass VPN"
-                android:textSize="26sp"
-                android:textStyle="bold"
-                android:textColor="#333"
-                android:layout_marginTop="16dp"
-                android:layout_marginBottom="24dp"/>
-
-            <!-- SECTION 1: HOST (SHARE INTERNET) -->
-            <androidx.cardview.widget.CardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="4dp"
-                android:layout_marginBottom="20dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="MODE A: HOST (Share Internet)"
-                        android:textStyle="bold"
-                        android:textColor="#2196F3"
-                        android:textSize="16sp"
-                        android:layout_marginBottom="8dp"/>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="1. Turn on Mobile Data.\n2. Click Start to create a Wi-Fi Group.\n3. Turn on Wi-Fi and Location if asked."
-                        android:textSize="13sp"
-                        android:textColor="#666"
-                        android:layout_marginBottom="12dp"/>
-
-                    <Button
-                        android:id="@+id/btn_start_host"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Start Sharing"
-                        android:backgroundTint="#2196F3"
-                        android:textColor="@android:color/white"
-                        android:textStyle="bold"/>
-
-                    <Button
-                        android:id="@+id/btn_stop_host"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Stop Sharing"
-                        android:backgroundTint="#F44336"
-                        android:textColor="@android:color/white"
-                        android:layout_marginTop="4dp"/>
-
-                    <TextView
-                        android:id="@+id/tv_host_info"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Status: Stopped"
-                        android:background="#EEEEEE"
-                        android:padding="12dp"
-                        android:layout_marginTop="12dp"
-                        android:textColor="#444"
-                        android:fontFamily="monospace"
-                        android:textSize="13sp"/>
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
-            <!-- SECTION 2: CLIENT (CONNECT) -->
-            <androidx.cardview.widget.CardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="4dp"
-                android:layout_marginBottom="20dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Wi-Fi Band:"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:layout_marginTop="8dp"/>
-
-                    <RadioGroup
-                        android:id="@+id/rg_band"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="8dp">
-                        <RadioButton
-                            android:id="@+id/rb_24ghz"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="2.4 GHz"
-                            android:checked="true" />
-                        <RadioButton
-                            android:id="@+id/rb_5ghz"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp"
-                            android:text="5 GHz" />
-                    </RadioGroup>
-
-                    <TextView
-                        android:id="@+id/textView"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="btn_start_host " />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="MODE B: CLIENT (Connect)"
-                        android:textStyle="bold"
-                        android:textColor="#4CAF50"
-                        android:textSize="16sp"
-                        android:layout_marginBottom="8dp"/>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="1. Connect to the Host's Wi-Fi manually.\n2. Enter IP and Port from the Host phone.\n3. Turn on Location if asked."
-                        android:textSize="13sp"
-                        android:textColor="#666"
-                        android:layout_marginBottom="12dp"/>
-
-                    <EditText
-                        android:id="@+id/et_host_ip"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="Host IP (e.g. 192.168.49.1)"
-                        android:text="192.168.49.1"
-                        android:inputType="text"
-                        android:digits="0123456789."
-                        android:textSize="14sp" />
-
-                    <EditText
-                        android:id="@+id/et_host_port"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="Port (Default 8080)"
-                        android:inputType="number"
-                        android:text="8080"
-                        android:textSize="14sp" />
-
-                    <Button
-                        android:id="@+id/btn_connect"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Connect &amp; Start VPN"
-                        android:backgroundTint="#4CAF50"
-                        android:textColor="@android:color/white"
-                        android:textStyle="bold"
-                        android:layout_marginTop="8dp"/>
-
-                    <Button
-                        android:id="@+id/btn_stop_client"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Stop VPN"
-                        android:backgroundTint="#F44336"
-                        android:textColor="@android:color/white"
-                        android:layout_marginTop="4dp"/>
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
-            <!-- DEBUG AREA -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="8dp">
-
-                <Button
-                    android:id="@+id/btn_debug"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Run Connection Test"
-                    android:backgroundTint="#607D8B"
-                    android:layout_marginBottom="8dp"/>
-
-                <TextView
-                    android:id="@+id/tv_status_log"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Logs will appear here..."
-                    android:padding="12dp"
-                    android:background="#E0E0E0"
-                    android:textColor="#555555"
-                    android:textSize="12sp"
-                    android:fontFamily="monospace"
-                    android:minLines="5"/>
-            </LinearLayout>
-
-        </LinearLayout>
-    </ScrollView>
-</androidx.constraintlayout.widget.ConstraintLayout>
