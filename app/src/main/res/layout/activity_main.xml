@@ -23,17 +23,19 @@
             android:gravity="center_horizontal">
 
             <!-- APP TITLE -->
+
+            <!-- SECTION 1: HOST (SHARE INTERNET) -->
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Hotspot Bypass VPN"
-                android:textSize="26sp"
-                android:textStyle="bold"
-                android:textColor="#333"
                 android:layout_marginTop="16dp"
-                android:layout_marginBottom="24dp"/>
+                android:layout_marginBottom="24dp"
+                android:text="Hotspot Bypass VPN"
+                android:textColor="#333"
+                android:textSize="26sp"
+                android:textStyle="bold" />
 
-            <!-- SECTION 1: HOST (SHARE INTERNET) -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -59,10 +61,10 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
                         android:text="1. Turn on Mobile Data.\n2. Click Start to create a Wi-Fi Group.\n3. Turn on Wi-Fi and Location if asked."
-                        android:textSize="13sp"
                         android:textColor="#666"
-                        android:layout_marginBottom="12dp"/>
+                        android:textSize="13sp" />
 
                     <Button
                         android:id="@+id/btn_start_host"

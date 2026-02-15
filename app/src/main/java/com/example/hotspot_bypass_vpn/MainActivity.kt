@@ -25,6 +25,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlin.concurrent.thread
+import android.os.PowerManager
+import android.net.Uri
 
 class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener {
 
@@ -69,10 +71,15 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         btnStartHost.setOnClickListener {
             if (checkHardwareStatus()) {
-                val rgBand = findViewById<RadioGroup>(R.id.rg_band)
-                // 1 = 2.4GHz, 2 = 5GHz (Matching WifiP2pConfig constants)
-                val selectedBand = if (rgBand.checkedRadioButtonId == R.id.rb_5ghz) 2 else 1
+                // NEW CHECK: Battery Optimization
+                if (!isIgnoringBatteryOptimizations()) {
+                    log("Please allow 'No Restrictions' for battery to ensure stable sharing.")
+                    requestIgnoreBatteryOptimizations()
+                    return@setOnClickListener // Stop here so they can click again after allowing
+                }
 
+                val rgBand = findViewById<RadioGroup>(R.id.rg_band)
+                val selectedBand = if (rgBand.checkedRadioButtonId == R.id.rb_5ghz) 2 else 1
                 startHost(selectedBand)
             }
         }
@@ -84,6 +91,12 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
         btnConnect.setOnClickListener {
             if (checkHardwareStatus()) {
+                if (!isIgnoringBatteryOptimizations()) {
+                    log("Please allow 'No Restrictions' for battery to prevent VPN disconnects.")
+                    requestIgnoreBatteryOptimizations()
+                    return@setOnClickListener // Stop here
+                }
+
                 val ip = etIp.text.toString()
                 val portStr = etPort.text.toString()
 
@@ -116,20 +129,21 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     private fun checkHardwareStatus(): Boolean {
         if (!isWifiEnabled()) {
-            showEnableServiceDialog(
-                "Wi-Fi Required",
-                "Wi-Fi must be ON for this app to function.",
-                Settings.ACTION_WIFI_SETTINGS
-            )
+            showEnableServiceDialog("Wi-Fi Required", "Wi-Fi must be ON.", Settings.ACTION_WIFI_SETTINGS)
             return false
         }
-        if (!isLocationEnabled()) {
-            showEnableServiceDialog(
-                "Location Required",
-                "System Location (GPS) must be ON for Android to allow Wi-Fi Direct/Network discovery.",
-                Settings.ACTION_LOCATION_SOURCE_SETTINGS
-            )
-            return false
+
+        // On Android 13+ (API 33), if we have NEARBY_WIFI_DEVICES permission,
+        // the system Location toggle is NOT required.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            if (!isLocationEnabled()) {
+                showEnableServiceDialog(
+                    "Location Required",
+                    "On this version of Android, System Location must be ON for Wi-Fi Direct.",
+                    Settings.ACTION_LOCATION_SOURCE_SETTINGS
+                )
+                return false
+            }
         }
         return true
     }
@@ -141,7 +155,15 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     private fun isLocationEnabled(): Boolean {
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // For Android 9 (API 28) and above, use the official global check
+            locationManager.isLocationEnabled
+        } else {
+            // For older versions, check if either GPS or Network provider is enabled
+            val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            val isNetworkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            isGpsEnabled || isNetworkEnabled
+        }
     }
 
     private fun showEnableServiceDialog(title: String, message: String, settingsAction: String) {
@@ -271,8 +293,8 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
 
     override fun onDestroy() {
         super.onDestroy()
-        proxyServer.stop()
-        manager.removeGroup(channel, null)
+//        proxyServer.stop()
+//        manager.removeGroup(channel, null)
     }
 
     // --- HELPERS ---
@@ -321,6 +343,30 @@ class MainActivity : AppCompatActivity(), WifiP2pManager.ConnectionInfoListener 
             } catch (e: Exception) {
                 log("✗ Internet Unreachable: ${e.message}")
             }
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Fallback if the direct dialog fails
+                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                startActivity(intent)
+            }
+        }
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } else {
+            true
         }
     }
 
