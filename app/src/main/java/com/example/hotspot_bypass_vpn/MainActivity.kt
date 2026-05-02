@@ -641,6 +641,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             isHostRunning.value = true
             logState.add("Starting Host Service...")
         }
+        saveServiceState(hostRunning = true)
     }
 
     private fun handleStopHost() {
@@ -649,10 +650,15 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         hostInfoState.value = null
         isHostRunning.value = false
         logState.add("Host Service Stopped.")
+        saveServiceState(hostRunning = false)
     }
 
     private fun handleConnectClient() {
         if (checkHardwareStatus()) {
+            if (!isIgnoringBatteryOptimizations()) {
+                requestIgnoreBatteryOptimizations()
+                return
+            }
             if (getPrivateDnsMode() == "hostname") {
                 Toast.makeText(this, "Disable Private DNS first!", Toast.LENGTH_LONG).show()
                 navigateToPrivateDnsSettings()
@@ -667,6 +673,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         startService(intent)
         isClientRunning.value = false
         logState.add("VPN Client Stopped.")
+
+        // FIX: Use vpnRunning = false
+        saveServiceState(vpnRunning = false)
     }
 
     private fun startVpnService(ip: String, port: Int) {
@@ -681,6 +690,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         }
         isClientRunning.value = true
         logState.add("VPN Client Starting...")
+
+        // FIX: Use vpnRunning instead of hostRunning
+        saveServiceState(vpnRunning = true)
     }
 
     override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
@@ -812,6 +824,15 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             } catch (e: SecurityException) {
                 logState.add("Sync error: Permission denied")
             }
+        }
+    }
+
+    private fun saveServiceState(hostRunning: Boolean? = null, vpnRunning: Boolean? = null) {
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            hostRunning?.let { putBoolean("host_was_running", it) }
+            vpnRunning?.let { putBoolean("vpn_was_running", it) }
+            apply()
         }
     }
 }

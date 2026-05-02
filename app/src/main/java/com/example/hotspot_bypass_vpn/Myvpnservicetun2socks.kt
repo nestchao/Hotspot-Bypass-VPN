@@ -1,12 +1,14 @@
 package com.example.hotspot_bypass_vpn
 
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
-import android.os.Build
-import android.os.ParcelFileDescriptor
+import android.net.wifi.WifiManager
+import android.os.*
 import androidx.core.app.NotificationCompat
 import engine.Engine
 import kotlin.concurrent.thread
@@ -17,10 +19,27 @@ class MyVpnServiceTun2Socks : VpnService() {
     private var isRunning = false
     private var proxyIp = ""
     private var proxyPort = 0
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     companion object {
         const val ACTION_STOP = "com.example.hotspot_bypass_vpn.STOP"
         var isServiceRunning = false // ADD THIS
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        acquireLocks()
+    }
+
+    private fun acquireLocks() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BypassVPN::VpnWakeLock")
+        wakeLock?.acquire()
+
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BypassVPN::VpnWifiLock")
+        wifiLock?.acquire()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -206,9 +225,34 @@ class MyVpnServiceTun2Socks : VpnService() {
         getSystemService(NotificationManager::class.java).notify(1, notification)
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        DebugUtils.log("App swiped — scheduling VPN restart...")
+        val restartIntent = Intent(applicationContext, MyVpnServiceTun2Socks::class.java).apply {
+            putExtra("PROXY_IP", proxyIp)
+            putExtra("PROXY_PORT", proxyPort)
+        }
+        val pendingIntent = PendingIntent.getService(
+            applicationContext, 2, restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val triggerTime = SystemClock.elapsedRealtime() + 1000L
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pendingIntent)
+        } else {
+            alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pendingIntent)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         DebugUtils.log("CRITICAL: Executing Stop Sequence...")
         isServiceRunning = false // SET FALSE
+
+        // Release locks
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wifiLock?.let { if (it.isHeld) it.release() }
 
         // 1. FORCIBLY close the VPN Interface first
         // This tells the Android OS to immediately remove the VPN routes

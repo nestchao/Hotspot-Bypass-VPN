@@ -8,6 +8,7 @@
         - AndroidManifest.xml
         [DIR] java/
               [DIR] hotspot_bypass_vpn/
+                - BootReceiver.kt
                 - DebugUtils.kt
                 - Dnscache.kt
                 - HostService.kt

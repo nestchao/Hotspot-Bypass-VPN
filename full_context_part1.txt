@@ -161,7 +161,8 @@ FILE: app\src\main\AndroidManifest.xml
             android:name=".MyVpnServiceTun2Socks"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse"
-            android:exported="false">
+            android:exported="false"
+            android:process=":vpn">    <!-- ADD THIS LINE -->
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
@@ -185,6 +186,15 @@ FILE: app\src\main\AndroidManifest.xml
                 android:value="VPN proxy for hotspot bypass" />
         </service>
 
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- In AndroidManifest.xml -->
         <service
             android:name=".HostService"
@@ -200,6 +210,38 @@ FILE: app\src\main\AndroidManifest.xml
     </application>
 
 </manifest>
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\BootReceiver.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+            // Only restart if the services were previously running
+            // You could persist this preference in SharedPreferences
+            val prefs = context.getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+            val wasHostRunning = prefs.getBoolean("host_was_running", false)
+            val wasVpnRunning = prefs.getBoolean("vpn_was_running", false)
+
+            if (wasHostRunning) {
+                val hostIntent = Intent(context, HostService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(hostIntent)
+                } else {
+                    context.startService(hostIntent)
+                }
+            }
+        }
+    }
+}
 
 ============================================================
 FILE: app\src\main\java\com\example\hotspot_bypass_vpn\DebugUtils.kt
@@ -365,6 +407,9 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.os.*
 import androidx.core.app.NotificationCompat
 import android.util.Log
+import android.os.SystemClock
+import android.app.AlarmManager
+import android.app.PendingIntent
 
 class HostService : Service() {
 
@@ -468,8 +513,63 @@ class HostService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Keeps service alive when swiped away
-        Log.d("HostService", "App swiped, service continuing...")
+        Log.d("HostService", "App swiped — scheduling restart...")
+        val restartIntent = Intent(applicationContext, HostService::class.java)
+        val pendingIntent = PendingIntent.getService(
+            applicationContext, 1, restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val triggerTime = SystemClock.elapsedRealtime() + 1000L
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                } else {
+                    // Fallback to inexact alarm if permission is denied
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        } catch (e: SecurityException) {
+            Log.e("HostService", "Exact alarm permission missing, using inexact fallback", e)
+            // Safety fallback for unexpected cases
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        }
+
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun createNotification(content: String): Notification {
@@ -1170,6 +1270,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             isHostRunning.value = true
             logState.add("Starting Host Service...")
         }
+        saveServiceState(hostRunning = true)
     }
 
     private fun handleStopHost() {
@@ -1178,6 +1279,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         hostInfoState.value = null
         isHostRunning.value = false
         logState.add("Host Service Stopped.")
+        saveServiceState(hostRunning = false)
     }
 
     private fun handleConnectClient() {
@@ -1196,6 +1298,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         startService(intent)
         isClientRunning.value = false
         logState.add("VPN Client Stopped.")
+
+        // FIX: Use vpnRunning = false
+        saveServiceState(vpnRunning = false)
     }
 
     private fun startVpnService(ip: String, port: Int) {
@@ -1210,6 +1315,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         }
         isClientRunning.value = true
         logState.add("VPN Client Starting...")
+
+        // FIX: Use vpnRunning instead of hostRunning
+        saveServiceState(vpnRunning = true)
     }
 
     override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
@@ -1341,6 +1449,15 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             } catch (e: SecurityException) {
                 logState.add("Sync error: Permission denied")
             }
+        }
+    }
+
+    private fun saveServiceState(hostRunning: Boolean? = null, vpnRunning: Boolean? = null) {
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            hostRunning?.let { putBoolean("host_was_running", it) }
+            vpnRunning?.let { putBoolean("vpn_was_running", it) }
+            apply()
         }
     }
 }

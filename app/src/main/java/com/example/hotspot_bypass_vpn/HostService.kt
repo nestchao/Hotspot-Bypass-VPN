@@ -10,6 +10,9 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.os.*
 import androidx.core.app.NotificationCompat
 import android.util.Log
+import android.os.SystemClock
+import android.app.AlarmManager
+import android.app.PendingIntent
 
 class HostService : Service() {
 
@@ -113,8 +116,65 @@ class HostService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Keeps service alive when swiped away
-        Log.d("HostService", "App swiped, service continuing...")
+        Log.d("HostService", "App swiped — scheduling restart...")
+        val restartIntent = Intent(applicationContext, HostService::class.java).apply {
+            putExtra("WIFI_BAND", preferredBand)
+        }
+        val pendingIntent = PendingIntent.getService(
+            applicationContext, 1, restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val triggerTime = SystemClock.elapsedRealtime() + 1000L
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                } else {
+                    // Fallback to inexact alarm if permission is denied
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        } catch (e: SecurityException) {
+            Log.e("HostService", "Exact alarm permission missing, using inexact fallback", e)
+            // Safety fallback for unexpected cases
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        }
+
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun createNotification(content: String): Notification {
