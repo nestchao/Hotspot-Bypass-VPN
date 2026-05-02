@@ -136,20 +136,25 @@ class TunManager:
     def start(self):
         t2s_exe = self._check_dependencies()
         
+        # FIX 1: Clean up any zombie routes from a previous crashed session
+        self.log("Cleaning up old routing states...")
+        subprocess.run(["route", "delete", "0.0.0.0", "mask", "128.0.0.0"], capture_output=True)
+        subprocess.run(["route", "delete", "128.0.0.0", "mask", "128.0.0.0"], capture_output=True)
+
         self.log("Starting VPN Interface...")
         cmd =[
             t2s_exe,
             "-device", "tun://PhoneVPN",
             "-proxy", f"socks5://{self.phone_ip}:{self.phone_port}",
-            "-loglevel", "error"
+            "-loglevel", "warning"  # Changed from error to warning for better debugging
         ]
 
-        cflags = 0x08000000 if IS_WINDOWS else 0 # Hide console window
+        cflags = 0x08000000 if IS_WINDOWS else 0
         self.process = subprocess.Popen(cmd, cwd=BIN_DIR, creationflags=cflags)
 
         self.log("Waiting for network adapter...")
         adapter_found = False
-        for _ in range(10):
+        for _ in range(15): # FIX 2: Increased wait time from 10 to 15 seconds
             res = subprocess.run(["netsh", "interface", "ipv4", "show", "interfaces"], capture_output=True, text=True)
             if "PhoneVPN" in res.stdout:
                 adapter_found = True
@@ -157,16 +162,26 @@ class TunManager:
             time.sleep(1)
             
         if not adapter_found:
-            raise Exception("Failed to create Virtual Adapter.")
+            self.stop() # Force cleanup
+            raise Exception("Failed to create Virtual Adapter. Check if Wintun driver installed properly.")
+
+        # FIX 3: Give Windows a moment to fully initialize the adapter before setting IPs
+        time.sleep(2.0) 
 
         self.log("Configuring IP & DNS routing...")
         subprocess.run(["netsh", "interface", "ip", "set", "address", "name=PhoneVPN", "static", "10.0.0.2", "255.255.255.0", "10.0.0.1"], capture_output=True)
         subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=PhoneVPN", "static", "8.8.8.8"], capture_output=True)
 
+        # FIX 4: Give Windows a moment to apply the IP before modifying global routes
+        time.sleep(1.0)
+
         self.log("Applying Global Traffic Routes (0.0.0.0/1 & 128.0.0.0/1)...")
-        # Standard VPN trick: Two /1 routes override default gateway without deleting it
-        subprocess.run(["route", "add", "0.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True)
-        subprocess.run(["route", "add", "128.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True)
+        res1 = subprocess.run(["route", "add", "0.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True, text=True)
+        res2 = subprocess.run(["route", "add", "128.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True, text=True)
+        
+        if "failed" in res1.stderr.lower() or "failed" in res2.stderr.lower():
+            self.stop()
+            raise Exception("Failed to inject routing tables. Run as Administrator!")
 
     def stop(self):
         self.log("Restoring original routing...")
@@ -181,7 +196,9 @@ class TunManager:
             except subprocess.TimeoutExpired:
                 self.process.kill()
             self.process = None
-
+            
+        # FIX 5: Attempt to forcefully disable the interface so it doesn't get stuck
+        subprocess.run(["netsh", "interface", "set", "interface", "PhoneVPN", "disable"], capture_output=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  LOCAL HTTP→SOCKS5 BRIDGE
@@ -197,6 +214,10 @@ class HttpSocksBridge:
 
     def start(self):
         self._running = True
+        # FIX: Ensure old server is completely dead before starting thread
+        if self._server:
+            try: self._server.close()
+            except: pass
         threading.Thread(target=self._serve, daemon=True).start()
 
     def stop(self):
@@ -206,20 +227,29 @@ class HttpSocksBridge:
         except Exception: pass
 
     def _serve(self):
-        try:
-            self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self._server.bind(("127.0.0.1", self.local_port))
-            self._server.listen(200)
-            self._server.settimeout(1.0)
-            while self._running:
-                try:
-                    conn, addr = self._server.accept()
-                    threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
-                except socket.timeout: continue
-                except Exception: break
-        except Exception as e:
-            self.log(f"[Bridge] Server error: {e}")
+        # FIX: Added a retry loop so if the port is stuck in TIME_WAIT, it tries again.
+        for attempt in range(5):
+            try:
+                self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self._server.bind(("127.0.0.1", self.local_port))
+                self._server.listen(200)
+                self._server.settimeout(1.0)
+                break # Success! Break out of the retry loop
+            except OSError as e:
+                self.log(f"[Bridge] Port {self.local_port} in use. Retrying ({attempt+1}/5)...")
+                time.sleep(1)
+        else:
+            self.log(f"[Bridge] FATAL: Could not bind port {self.local_port}.")
+            self._running = False
+            return
+
+        while self._running:
+            try:
+                conn, addr = self._server.accept()
+                threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+            except socket.timeout: continue
+            except Exception: break
 
     def _handle(self, client: socket.socket):
         try:
@@ -554,10 +584,14 @@ class App(tk.Tk):
         self._set_status("Inactive", FG_DIM)
 
     def _on_close(self):
+        # FIX: Automatically clear proxy on exit, don't rely just on the prompt
+        if self._system_proxy_on:
+            WindowsProxyManager.clear_proxy()
+            
         if self._tun_mgr or self._bridge or self._system_proxy_on:
             if messagebox.askyesno("Quit", "Connection is still active. Stop and exit?"):
                 self._do_stop()
-                time.sleep(0.5)
+                time.sleep(1.0) # Give it time to delete routes
                 self.destroy()
         else:
             self.destroy()

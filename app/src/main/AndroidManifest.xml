@@ -43,7 +43,8 @@
             android:name=".MyVpnServiceTun2Socks"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse"
-            android:exported="false">
+            android:exported="false"
+            android:process=":vpn">    <!-- ADD THIS LINE -->
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
@@ -66,6 +67,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="VPN proxy for hotspot bypass" />
         </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- In AndroidManifest.xml -->
         <service
