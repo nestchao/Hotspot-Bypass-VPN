@@ -1,0 +1,260 @@
+package com.example.hotspot_bypass_vpn
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import androidx.core.app.NotificationCompat
+import engine.Engine
+import kotlin.concurrent.thread
+
+class MyVpnServiceTun2Socks : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var isRunning = false
+    private var proxyIp = ""
+    private var proxyPort = 0
+
+    companion object {
+        const val ACTION_STOP = "com.example.hotspot_bypass_vpn.STOP"
+        var isServiceRunning = false // ADD THIS
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            isServiceRunning = false // SET FALSE
+            DebugUtils.log("Stop Action Received via Intent")
+            shutdownService()
+            return START_NOT_STICKY
+        }
+        isServiceRunning = true // SET TRUE
+
+        if (isRunning) {
+            DebugUtils.log("Service already running - resetting connections")
+            resetConnections()
+        }
+
+        proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
+        proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
+
+        startForegroundNotification()
+
+        thread(name = "ProxyTest") {
+            if (DebugUtils.testProxyConnection(proxyIp, proxyPort)) {
+                startVpnWithTun2Socks()
+            } else {
+                updateNotification("Error: Cannot reach proxy at $proxyIp:$proxyPort")
+                stopSelf()
+            }
+        }
+
+        return START_STICKY
+    }
+
+    private fun resetConnections() {
+        try {
+            Engine.stop()
+            Thread.sleep(500)
+            vpnInterface?.close()
+            vpnInterface = null
+            DebugUtils.log("✓ Connections reset")
+        } catch (e: Exception) {
+            DebugUtils.error("Error resetting connections", e)
+        }
+    }
+
+    private fun shutdownService() {
+        isRunning = false
+
+        // 1. Close the interface first to drop the system VPN route
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+        } catch (e: Exception) {}
+
+        // 2. Stop the native engine
+        try {
+            Engine.stop()
+        } catch (e: Exception) {}
+
+        // 3. Remove foreground status and stop
+        stopForeground(true)
+        stopSelf()
+
+        DebugUtils.log("Service shutdown sequence complete")
+    }
+
+    private fun startVpnWithTun2Socks() {
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+            Thread.sleep(500)
+
+            DebugUtils.log("Setting up fresh VPN interface...")
+
+            DebugUtils.log("Setting up VPN interface...")
+
+            val builder = Builder()
+                .setMtu(1350) // LOWER MTU: 1350 is the "sweet spot" for gaming over proxies
+                .addAddress("10.0.0.2", 24)
+                .addRoute("0.0.0.0", 0) // Route EVERYTHING
+                // .addRoute("::", 0) // Uncomment if you want to block IPv6 leaks
+                .addDisallowedApplication(packageName)
+                .addDnsServer("8.8.8.8")
+                .addDnsServer("1.1.1.1")
+                .setSession("Hotspot Bypass VPN")
+                .setBlocking(true) // Crucial for gaming stability
+
+            vpnInterface = builder.establish()
+
+            if (vpnInterface == null) {
+                DebugUtils.error("Failed to establish VPN interface")
+                updateNotification("Error: VPN interface creation failed")
+                stopSelf()
+                return
+            }
+
+            val fd = vpnInterface!!.fd
+            DebugUtils.log("VPN interface established with fd: $fd")
+
+            isRunning = true
+            updateNotification("VPN Active - Routing through tun2socks")
+
+            // Start tun2socks in a separate thread
+            thread(name = "tun2socks-engine", isDaemon = false) {
+                runTun2Socks(fd)
+            }
+
+        } catch (e: Exception) {
+            DebugUtils.error("Failed to start VPN", e)
+            updateNotification("Error: ${e.message}")
+            stopSelf()
+        }
+    }
+
+    private fun runTun2Socks(fd: Int) {
+        try {
+            val socksProxy = "socks5://$proxyIp:$proxyPort"
+
+            DebugUtils.log("Configuring tun2socks engine...")
+
+            // 1. Create a Key object for configuration
+            val key = engine.Key()
+
+            // 2. Set the parameters using the Key object
+            // Note: The device must be "fd://<number>" for Android
+            key.setDevice("fd://$fd")
+            key.setProxy(socksProxy)
+            key.setMTU(1420L)
+            key.setLogLevel("info")
+
+            // Optional: Some versions allow setting DNS here,
+            // but often it's handled by the VPN Builder routes
+            // key.setDNS("8.8.8.8,8.8.4.4")
+
+            // 3. Register the configuration and start the engine
+            Engine.insert(key)
+            Engine.start()
+
+            DebugUtils.log("✓ tun2socks started successfully!")
+            updateNotification("✓ VPN Active - Connected to $proxyIp:$proxyPort")
+
+            // Keep the thread alive while VPN is running
+            while (isRunning) {
+                Thread.sleep(500)
+            }
+
+        } catch (e: Exception) {
+            DebugUtils.error("tun2socks error", e)
+            updateNotification("Error: ${e.message}")
+        } finally {
+            DebugUtils.log("tun2socks engine stopped")
+        }
+    }
+
+    private fun startForegroundNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "vpn_channel",
+                "VPN Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("Hotspot Bypass VPN")
+            .setContentText("Initializing tun2socks...")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        startForeground(1, notification)
+    }
+
+    private fun updateNotification(message: String) {
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("Hotspot Bypass VPN")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        getSystemService(NotificationManager::class.java).notify(1, notification)
+    }
+
+    override fun onDestroy() {
+        DebugUtils.log("CRITICAL: Executing Stop Sequence...")
+        isServiceRunning = false // SET FALSE
+
+        // 1. FORCIBLY close the VPN Interface first
+        // This tells the Android OS to immediately remove the VPN routes
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+            DebugUtils.log("✓ VPN Interface closed (Routing removed)")
+        } catch (e: Exception) {
+            DebugUtils.error("Error closing interface", e)
+        }
+
+        // 2. Stop the tun2socks Engine
+        try {
+            Engine.stop()
+            DebugUtils.log("✓ tun2socks engine stopped")
+        } catch (e: Exception) {
+            DebugUtils.error("Error stopping engine", e)
+        }
+
+        // 3. Clean up notifications
+        stopForeground(true)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(1)
+
+        DebugUtils.log("VPN Service fully destroyed")
+
+        // 4. Final safety: Kill the process if it's stuck
+        // (Optional: Only use if the above doesn't work)
+        // android.os.Process.killProcess(android.os.Process.myPid())
+
+        super.onDestroy()
+
+        thread {
+            Thread.sleep(1000)
+            if (!isRunning) {
+                // If the app is only used for VPN, you can kill the process
+                // to ensure the SOCKS engine is dead.
+                // android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
+    }
+
+
+    override fun onRevoke() {
+        DebugUtils.log("VPN Permission revoked by system")
+        stopSelf()
+        super.onRevoke()
+    }
+}
