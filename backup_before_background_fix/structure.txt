@@ -1,0 +1,20 @@
+[DIR] HotspotBypassVPN/
+  - build.gradle.kts
+  - settings.gradle.kts
+  [DIR] app/
+    - build.gradle.kts
+    [DIR] src/
+      [DIR] main/
+        - AndroidManifest.xml
+        [DIR] java/
+              [DIR] hotspot_bypass_vpn/
+                - BootReceiver.kt
+                - DebugUtils.kt
+                - Dnscache.kt
+                - HostService.kt
+                - MainActivity.kt
+                - MyVpnService.kt
+                - Myvpnserviceoptimized.kt
+                - Myvpnservicetun2socks.kt
+                - ProxyServer.kt
+                - WiFiDirectBroadcastReceiver.kt

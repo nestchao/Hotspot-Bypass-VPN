@@ -1,0 +1,3646 @@
+
+============================================================
+FILE: build.gradle.kts
+============================================================
+
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.android) apply false
+    // ADD THIS LINE:
+    alias(libs.plugins.kotlin.compose) apply false
+}
+
+============================================================
+FILE: settings.gradle.kts
+============================================================
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // Try the standard jitpack again with a fresh proxy setting
+        maven { url = uri("https://jitpack.io") }
+    }
+}
+
+rootProject.name = "Hotspot-Bypass-VPN"
+include(":app")
+
+============================================================
+FILE: app\build.gradle.kts
+============================================================
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "com.example.hotspot_bypass_vpn"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.example.hotspot_bypass_vpn"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = "11"
+    }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.activity)
+    implementation(libs.androidx.constraintlayout)
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+
+    // OkHttp for SOCKS proxy support
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Local AAR library - tun2socks
+    implementation(files("libs/tun2socks-1.0.4.aar"))
+
+    val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.activity:activity-compose:1.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("androidx.compose.material:material-icons-extended")
+}
+
+============================================================
+FILE: app\src\main\AndroidManifest.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HotspotBypassVPN">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- NEW: tun2socks VPN Service -->
+        <service
+            android:name=".MyVpnServiceTun2Socks"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse"
+            android:exported="false"
+            android:process=":vpn">    <!-- ADD THIS LINE -->
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="VPN proxy using tun2socks" />
+        </service>
+
+        <!-- KEEP: Original optimized service (optional backup) -->
+        <service
+            android:name=".MyVpnServiceOptimized"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse"
+            android:exported="false"
+            android:enabled="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="VPN proxy for hotspot bypass" />
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- In AndroidManifest.xml -->
+        <service
+            android:name=".HostService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":proxy"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Proxy server and Wi-Fi Direct host" />
+        </service>
+    </application>
+
+</manifest>
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\BootReceiver.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+            // Only restart if the services were previously running
+            // You could persist this preference in SharedPreferences
+            val prefs = context.getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+            val wasHostRunning = prefs.getBoolean("host_was_running", false)
+            val wasVpnRunning = prefs.getBoolean("vpn_was_running", false)
+
+            if (wasHostRunning) {
+                val hostIntent = Intent(context, HostService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(hostIntent)
+                } else {
+                    context.startService(hostIntent)
+                }
+            }
+        }
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\DebugUtils.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.util.Log
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.concurrent.atomic.AtomicInteger
+
+object DebugUtils {
+    private const val TAG = "VPN_DEBUG"
+    private val connectionCounter = AtomicInteger(0)
+
+    fun log(message: String) {
+        Log.d(TAG, "[${Thread.currentThread().name}] $message")
+    }
+
+    fun error(message: String, e: Throwable? = null) {
+        Log.e(TAG, "[${Thread.currentThread().name}] $message", e)
+    }
+
+    fun testProxyConnection(proxyIp: String, proxyPort: Int): Boolean {
+        return try {
+            log("Testing connection to proxy: $proxyIp:$proxyPort")
+            val socket = Socket()
+            socket.connect(InetSocketAddress(proxyIp, proxyPort), 5000)
+            socket.close()
+            log("✓ Proxy connection test PASSED")
+            true
+        } catch (e: Exception) {
+            error("✗ Proxy connection test FAILED: ${e.message}")
+            false
+        }
+    }
+
+    fun testInternetConnectivity(): Boolean {
+        return try {
+            log("Testing internet connectivity")
+            val socket = Socket()
+            socket.connect(InetSocketAddress("8.8.8.8", 53), 3000)
+            socket.close()
+            log("✓ Internet connectivity test PASSED")
+            true
+        } catch (e: Exception) {
+            error("✗ Internet connectivity test FAILED: ${e.message}")
+            false
+        }
+    }
+
+    fun dumpVpnStats(
+        tcpConnections: Map<*, *>,
+        udpSockets: Map<*, *>,
+        writeQueueSize: Int,
+        poolActiveCount: Int,
+        poolQueueSize: Int
+    ) {
+        log("VPN Stats:")
+        log("  TCP Connections: ${tcpConnections.size}")
+        log("  UDP Sockets: ${udpSockets.size}")
+        log("  Write Queue: $writeQueueSize")
+        log("  Pool Active: $poolActiveCount")
+        log("  Pool Queue: $poolQueueSize")
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\Dnscache.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+/**
+ * DNS Cache to avoid repeated slow lookups
+ * This can reduce DNS query time from 500ms+ to <1ms for cached entries
+ */
+class DnsCache {
+    private data class CacheEntry(
+        val address: ByteArray,
+        val timestamp: Long,
+        val ttl: Long = TimeUnit.MINUTES.toMillis(5) // 5 minute default TTL
+    ) {
+        fun isExpired(): Boolean = System.currentTimeMillis() - timestamp > ttl
+    }
+
+    private val cache = ConcurrentHashMap<String, CacheEntry>()
+
+    fun invalidate(domain: String) {
+        cache.remove(domain)
+    }
+
+    fun invalidateAll() {
+        cache.clear()
+    }
+
+    // Pre-populate with common domains
+    init {
+        // These will be resolved on first use, then cached
+        preWarm(listOf(
+            "www.google.com",
+            "www.facebook.com",
+            "www.instagram.com",
+            "www.youtube.com",
+            "api.instagram.com",
+            "i.instagram.com"
+        ))
+    }
+
+    private fun preWarm(domains: List<String>) {
+        Thread {
+            domains.forEach { domain ->
+                try {
+                    val addr = InetAddress.getByName(domain)
+                    put(domain, addr.address)
+                } catch (e: Exception) {
+                    // Ignore pre-warm failures
+                }
+            }
+        }.start()
+    }
+
+    fun get(domain: String): ByteArray? {
+        val entry = cache[domain]
+        return if (entry != null && !entry.isExpired()) {
+            entry.address
+        } else {
+            cache.remove(domain)
+            null
+        }
+    }
+
+    fun put(domain: String, address: ByteArray, ttl: Long = TimeUnit.MINUTES.toMillis(5)) {
+        cache[domain] = CacheEntry(address, System.currentTimeMillis(), ttl)
+    }
+
+    fun clear() {
+        cache.clear()
+    }
+
+    fun size() = cache.size
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\HostService.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.annotation.SuppressLint
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.net.wifi.WifiManager
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.*
+import androidx.core.app.NotificationCompat
+import android.util.Log
+import android.os.SystemClock
+import android.app.AlarmManager
+import android.app.PendingIntent
+
+class HostService : Service() {
+
+    private var proxyServer: ProxyServer? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    private lateinit var p2pManager: WifiP2pManager
+    private lateinit var p2pChannel: WifiP2pManager.Channel
+    private var preferredBand = 1 // 1 for 2.4GHz, 2 for 5GHz
+
+    companion object {
+        var isServiceRunning = false
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        p2pChannel = p2pManager.initialize(applicationContext, mainLooper, null)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP") {
+            isServiceRunning = false
+            stopGroupAndService()
+            return START_NOT_STICKY
+        }
+        isServiceRunning = true
+
+        // Get the band preference from MainActivity
+        preferredBand = intent?.getIntExtra("WIFI_BAND", 1) ?: 1
+
+        startForeground(2, createNotification("Host is active with custom password"))
+        acquireLocks()
+
+        if (proxyServer == null) {
+            proxyServer = ProxyServer()
+            proxyServer?.start()
+        }
+
+        setupWifiDirectGroup()
+
+        return START_STICKY
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setupWifiDirectGroup() {
+        // First, remove any existing group to avoid "Busy" errors
+        p2pManager.removeGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                createGroupWithPassword()
+            }
+            override fun onFailure(reason: Int) {
+                // If no group exists, just create the new one
+                createGroupWithPassword()
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createGroupWithPassword() {
+        // Use the Builder to set the specific password (Android 10+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                // 2437MHz = 2.4GHz Channel 6 | 5180MHz = 5GHz Channel 36
+                val frequency = if (preferredBand == 1) 2437 else 5180
+
+                val config = WifiP2pConfig.Builder()
+                    .setNetworkName("DIRECT-HotspotBypass")
+                    .setPassphrase("87654321") // <--- YOUR NEW PASSWORD
+                    .setGroupOperatingFrequency(frequency)
+                    .build()
+
+                p2pManager.createGroup(p2pChannel, config, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        updateNotification("✓ Sharing Active | Pass: 87654321")
+                    }
+                    override fun onFailure(reason: Int) {
+                        Log.e("HostService", "Config Group failed ($reason), trying legacy...")
+                        createLegacyGroup()
+                    }
+                })
+                return
+            } catch (e: Exception) {
+                Log.e("HostService", "Builder error: ${e.message}")
+            }
+        }
+        createLegacyGroup()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createLegacyGroup() {
+        p2pManager.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                updateNotification("✓ Sharing Active (Auto Password)")
+            }
+            override fun onFailure(reason: Int) {
+                updateNotification("✗ Failed to create group")
+            }
+        })
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d("HostService", "App swiped — scheduling restart...")
+        val restartIntent = Intent(applicationContext, HostService::class.java)
+        val pendingIntent = PendingIntent.getService(
+            applicationContext, 1, restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val triggerTime = SystemClock.elapsedRealtime() + 1000L
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                } else {
+                    // Fallback to inexact alarm if permission is denied
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        } catch (e: SecurityException) {
+            Log.e("HostService", "Exact alarm permission missing, using inexact fallback", e)
+            // Safety fallback for unexpected cases
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        }
+
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun createNotification(content: String): Notification {
+        val channelId = "host_service_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Host Service", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        val stopIntent = Intent(this, HostService::class.java).apply { action = "STOP" }
+        val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Hotspot Bypass Host")
+            .setContentText(content)
+            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Sharing", stopPendingIntent)
+            .build()
+    }
+
+    private fun updateNotification(content: String) {
+        val notification = createNotification(content)
+        getSystemService(NotificationManager::class.java).notify(2, notification)
+    }
+
+    private fun acquireLocks() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BypassVPN::HostWakeLock")
+        wakeLock?.acquire()
+
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BypassVPN::WifiLock")
+        wifiLock?.acquire()
+    }
+
+    private fun stopGroupAndService() {
+        p2pManager.removeGroup(p2pChannel, null)
+        proxyServer?.stop()
+        stopForeground(true)
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wifiLock?.let { if (it.isHeld) it.release() }
+        isServiceRunning = false
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\MainActivity.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.Manifest
+import android.content.*
+import android.content.pm.PackageManager
+import android.net.VpnService
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import android.net.wifi.p2p.WifiP2pGroup
+import android.net.wifi.p2p.WifiP2pInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.net.Uri
+import android.os.PowerManager
+import kotlin.concurrent.thread
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+
+// Dark Theme (Cyber)
+val DarkPurpleBg = Color(0xFF120024)
+val DarkCardPurple = Color(0xFF1A0033)
+val CyberTeal = Color(0xFF03DAC5)
+val CyberPurple = Color(0xFF6200EE)
+
+// Light Theme (Clean)
+val LightBg = Color(0xFFF5F7FA)
+val LightSurface = Color(0xFFFFFFFF)
+val LightPrimaryTeal = Color(0xFF00796B)
+val LightSecondary = Color(0xFF3F51B5)
+
+private val DarkColorScheme = darkColorScheme(
+    primary = CyberTeal,
+    secondary = CyberPurple,
+    background = DarkPurpleBg,
+    surface = DarkCardPurple,
+    onBackground = Color.White,
+    onSurface = Color.White,
+    primaryContainer = CyberTeal.copy(alpha = 0.1f),
+    onPrimaryContainer = CyberTeal
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = LightPrimaryTeal,
+    secondary = LightSecondary,
+    background = LightBg,
+    surface = LightSurface,
+    onBackground = Color(0xFF1C1B1F),
+    onSurface = Color(0xFF1C1B1F),
+    primaryContainer = LightPrimaryTeal.copy(alpha = 0.1f),
+    onPrimaryContainer = LightPrimaryTeal
+)
+
+@Composable
+fun BypassVPNTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
+    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        // Add typography here if needed
+        content = content
+    )
+}
+
+data class HostInfo(
+    val ssid: String,
+    val pass: String,
+    val ip: String,
+    val port: String
+)
+
+class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener {
+
+    private lateinit var manager: WifiP2pManager
+    private lateinit var channel: WifiP2pManager.Channel
+    private lateinit var receiver: BroadcastReceiver
+    private val intentFilter = IntentFilter()
+
+    private var hostInfoState = mutableStateOf<HostInfo?>(null)
+    private var logState = mutableStateListOf<String>()
+    private var clientIp = mutableStateOf("192.168.49.1")
+    private var clientPort = mutableStateOf("8080")
+    private var selectedBand = mutableIntStateOf(1)
+    private var selectedTab = mutableIntStateOf(0)
+
+    // --- CRITICAL STATES ---
+    private var isHostRunning = mutableStateOf(false)
+    private var isClientRunning = mutableStateOf(false)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        channel = manager.initialize(this, mainLooper, null)
+
+        intentFilter.apply {
+            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+        }
+
+        checkPermissions()
+
+        setContent {
+            val isDarkMode = isSystemInDarkTheme()  // Call directly, not in wrapper
+            val colorScheme = if (isDarkMode) DarkColorScheme else LightColorScheme
+
+            MaterialTheme(colorScheme = colorScheme) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    MainScreen()
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun MainScreen() {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.app_logo),
+                                contentDescription = "App Logo",
+                                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(4.dp))
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text("BYPASS VPN", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Text("CONNECTED", fontSize = 8.sp, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding)) {
+                TabRow(
+                    selectedTabIndex = selectedTab.intValue,
+                    containerColor = MaterialTheme.colorScheme.background,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    divider = {},                  // Removes the thin gray line for a cleaner look
+                    indicator = { tabPositions ->
+                        if (selectedTab.intValue < tabPositions.size) {
+                            TabRowDefaults.SecondaryIndicator(
+                                modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab.intValue]),
+                                color = CyberTeal // The moving line under the tab
+                            )
+                        }
+                    }
+                ) {
+                    // Tab 1: Share (Host)
+                    Tab(
+                        selected = selectedTab.intValue == 0,
+                        onClick = { selectedTab.intValue = 0 },
+                        text = {
+                            Text(
+                                "Share (Host)",
+                                // Use Theme primary color instead of hardcoded CyberTeal
+                                color = if (selectedTab.intValue == 0) MaterialTheme.colorScheme.primary else Color.Gray,
+                                fontWeight = if (selectedTab.intValue == 0) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        icon = {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = null,
+                                tint = if (selectedTab.intValue == 0) MaterialTheme.colorScheme.primary else Color.Gray
+                            )
+                        }
+                    )
+
+                    // Tab 2: Connect (Client)
+                    Tab(
+                        selected = selectedTab.intValue == 1,
+                        onClick = { selectedTab.intValue = 1 },
+                        text = {
+                            Text(
+                                "Connect (Client)",
+                                color = if (selectedTab.intValue == 1) MaterialTheme.colorScheme.primary else Color.Gray,
+                                fontWeight = if (selectedTab.intValue == 1) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        icon = {
+                            Icon(
+                                Icons.Default.VpnLock,
+                                contentDescription = null,
+                                tint = if (selectedTab.intValue == 1) MaterialTheme.colorScheme.primary else Color.Gray
+                            )
+                        }
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (selectedTab.intValue == 0) {
+                        HostModeView()
+                    } else {
+                        ClientModeView()
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    DebugLogSection()
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun HostModeView() {
+        StatusCard(
+            title = "Hotspot Sharing",
+            isActive = isHostRunning.value,
+            activeColor = Color(0xFF4CAF50),
+            icon = Icons.Default.CellTower
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (isClientRunning.value) {
+            ConflictCard(message = "VPN Client is currently active. You cannot share while connected to another proxy.")
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            // FIXED: Uses the theme surface color instead of hardcoded CardPurple
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Wi-Fi Band:", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                    FilterChip(
+                        selected = selectedBand.intValue == 1,
+                        onClick = { selectedBand.intValue = 1 },
+                        label = { Text("2.4 GHz") },
+                        enabled = !isHostRunning.value && !isClientRunning.value,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.background, // Adapts to Light or Dark
+                            labelColor = MaterialTheme.colorScheme.onSurface      // Adapts to Black or White text
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FilterChip(
+                        selected = selectedBand.intValue == 2,
+                        onClick = { selectedBand.intValue = 2 },
+                        label = { Text("5 GHz") },
+                        enabled = !isHostRunning.value && !isClientRunning.value,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.background, // Adapts to Light or Dark
+                            labelColor = MaterialTheme.colorScheme.onSurface      // Adapts to Black or White text
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (!isHostRunning.value) {
+                    Button(
+                        onClick = { handleStartHost() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,    // Dynamic
+                            contentColor = MaterialTheme.colorScheme.background    // Dynamic
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = !isClientRunning.value
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("START SERVICE", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                    }
+                } else {
+                    Button(
+                        onClick = { handleStopHost() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFB00020), // Standard Red
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Default.Stop, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("STOP SERVICE", fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+        }
+
+        // Host Info Card (Update for contrast)
+        AnimatedVisibility(visible = hostInfoState.value != null) {
+            hostInfoState.value?.let { info ->
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSystemInDarkTheme()) Color(0xFF1B2E1C) else Color(0xFFE8F5E9)
+                    ),
+                    border = BorderStroke(1.dp, Color(0xFF4CAF50))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF4CAF50))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Connection Details (Phone B)", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                        }
+                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFF4CAF50).copy(alpha = 0.3f))
+                        InfoRow(label = "SSID", value = info.ssid)
+                        InfoRow(label = "Password", value = info.pass)
+                        InfoRow(label = "Proxy IP", value = info.ip)
+                        InfoRow(label = "Proxy Port", value = info.port)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun ClientModeView() {
+        StatusCard(
+            title = "VPN Tunnel",
+            isActive = isClientRunning.value,
+            activeColor = Color(0xFF2196F3),
+            icon = Icons.Default.Security
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (isHostRunning.value) {
+            ConflictCard(message = "Hotspot Sharing is currently active. You cannot start a VPN while sharing your own connection.")
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            // FIXED: Uses the theme surface color
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = clientIp.value,
+                    onValueChange = { clientIp.value = it },
+                    label = { Text("Host IP Address") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Lan, null) },
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !isClientRunning.value && !isHostRunning.value
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = clientPort.value,
+                    onValueChange = { clientPort.value = it },
+                    label = { Text("Port") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Numbers, null) },
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !isClientRunning.value && !isHostRunning.value
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (!isClientRunning.value) {
+                    Button(
+                        onClick = { handleConnectClient() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.background
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = !isHostRunning.value
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("START VPN", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                    }
+                } else {
+                    Button(
+                        onClick = { handleStopClient() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFB00020),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Default.Stop, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("STOP VPN", fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+        }
+
+        if (isClientRunning.value) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { handleReconnectVPN() },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Refresh, null)
+                Spacer(Modifier.width(8.dp))
+                Text("RECONNECT VPN", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    private fun handleReconnectVPN() {
+        logState.add("Reconnecting VPN...")
+        val stopIntent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+            action = MyVpnServiceTun2Socks.ACTION_STOP
+        }
+        startService(stopIntent)
+        thread {
+            Thread.sleep(2000)
+            runOnUiThread {
+                startVpnService(clientIp.value, clientPort.value.toIntOrNull() ?: 8080)
+                logState.add("VPN reconnected")
+            }
+        }
+    }
+
+    @Composable
+    fun ConflictCard(message: String) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isSystemInDarkTheme()) Color(0xFF3D0000) else Color(0xFFFFEBEE)
+            ),
+            border = BorderStroke(1.dp, Color.Red)
+        ) {
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(message, fontSize = 13.sp, color = Color(0xFFB71C1C), fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+
+    @Composable
+    fun StatusCard(title: String, isActive: Boolean, activeColor: Color, icon: ImageVector) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(animation = tween(800, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+            label = "alpha"
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                // Uses theme surface color
+                containerColor = if (isActive) activeColor.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
+            ),
+            border = BorderStroke(
+                width = if (isActive) 2.dp else 1.dp,
+                color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            )
+        ) {
+            Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(if (isActive) activeColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isActive) Color.White else Color.Gray,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Text(
+                        text = title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface // Adapts to Black/White
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(if (isActive) activeColor.copy(alpha = alpha) else Color.Gray))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isActive) "SERVICE ACTIVE" else "SERVICE READY",
+                            color = if (isActive) activeColor else Color.Gray,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun DebugLogSection() {
+        var showLogs by remember { mutableStateOf(false) }
+        val logBgColor = if (isSystemInDarkTheme()) Color(0xFF1E1E1E) else Color(0xFFE0E0E0)
+        val logTextColor = if (isSystemInDarkTheme()) Color(0xFF00E676) else Color(0xFF1B5E20)
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = { showLogs = !showLogs }) {
+                Icon(if (showLogs) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null)
+                Text(if (showLogs) "Hide Debug Logs" else "Show Debug Logs")
+            }
+            AnimatedVisibility(visible = showLogs) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .background(logBgColor, RoundedCornerShape(12.dp)) // Adaptive background
+                        .padding(12.dp)
+                ) {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        logState.asReversed().forEach { logLine ->
+                            Text(text = "➜ $logLine", fontSize = 11.sp, color = logTextColor) // Adaptive text
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun InfoRow(label: String, value: String) {
+        val clipboardManager = LocalClipboardManager.current
+        Row(modifier = Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label.uppercase(), fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Text(
+                    value,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface // Dynamic color
+                )
+            }
+            IconButton(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(value))
+                },
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f), CircleShape) // Subtle contrast
+                    .size(36.dp)
+            ) {
+                Icon(
+                    Icons.Default.ContentCopy,
+                    null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+
+    private fun handleStartHost() {
+        if (checkHardwareStatus()) {
+            if (!isIgnoringBatteryOptimizations()) {
+                requestIgnoreBatteryOptimizations()
+                return
+            }
+            val intent = Intent(this, HostService::class.java).apply { putExtra("WIFI_BAND", selectedBand.intValue) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            isHostRunning.value = true
+            logState.add("Starting Host Service...")
+        }
+        saveServiceState(hostRunning = true)
+    }
+
+    private fun handleStopHost() {
+        val intent = Intent(this, HostService::class.java).apply { action = "STOP" }
+        startService(intent)
+        hostInfoState.value = null
+        isHostRunning.value = false
+        logState.add("Host Service Stopped.")
+        saveServiceState(hostRunning = false)
+    }
+
+    private fun handleConnectClient() {
+        if (checkHardwareStatus()) {
+            if (getPrivateDnsMode() == "hostname") {
+                Toast.makeText(this, "Disable Private DNS first!", Toast.LENGTH_LONG).show()
+                navigateToPrivateDnsSettings()
+                return
+            }
+            prepareVpn(clientIp.value, clientPort.value.toIntOrNull() ?: 8080)
+        }
+    }
+
+    private fun handleStopClient() {
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply { action = MyVpnServiceTun2Socks.ACTION_STOP }
+        startService(intent)
+        isClientRunning.value = false
+        logState.add("VPN Client Stopped.")
+
+        // FIX: Use vpnRunning = false
+        saveServiceState(vpnRunning = false)
+    }
+
+    private fun startVpnService(ip: String, port: Int) {
+        val intent = Intent(this, MyVpnServiceTun2Socks::class.java).apply {
+            putExtra("PROXY_IP", ip)
+            putExtra("PROXY_PORT", port)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        isClientRunning.value = true
+        logState.add("VPN Client Starting...")
+
+        // FIX: Use vpnRunning instead of hostRunning
+        saveServiceState(vpnRunning = true)
+    }
+
+    override fun onConnectionInfoAvailable(info: WifiP2pInfo?) {
+        if (info != null && info.groupFormed) {
+            isHostRunning.value = true
+        }
+    }
+
+    fun updateGroupInfo(group: WifiP2pGroup?) {
+        if (group != null && group.isGroupOwner) {
+            hostInfoState.value = HostInfo(
+                ssid = group.networkName ?: "Unknown",
+                pass = group.passphrase ?: "N/A",
+                ip = "192.168.49.1",
+                port = "8080"
+            )
+            isHostRunning.value = true
+        }
+    }
+
+    private fun checkPermissions() {
+        val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CHANGE_WIFI_STATE, Manifest.permission.ACCESS_WIFI_STATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
+    }
+
+    private fun checkHardwareStatus(): Boolean {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        if (!wifiManager.isWifiEnabled) {
+            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            return false
+        }
+        return true
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } else true
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivity(intent)
+    }
+
+    private fun prepareVpn(ip: String, port: Int) {
+        val intent = VpnService.prepare(this)
+        if (intent != null) {
+            startActivityForResult(intent, 102)
+        } else {
+            startVpnService(ip, port)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 102 && resultCode == RESULT_OK) {
+            startVpnService(clientIp.value, clientPort.value.toIntOrNull() ?: 8080)
+        }
+    }
+
+    private val logReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.getStringExtra("message")?.let { logState.add(it) }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
+        registerReceiver(receiver, intentFilter)
+        ContextCompat.registerReceiver(this, logReceiver, IntentFilter("VPN_LOG"), ContextCompat.RECEIVER_NOT_EXPORTED)
+
+        // SYNC STATES ON RESUME
+        syncServiceStates()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try { unregisterReceiver(receiver) } catch (e: Exception) {}
+        try { unregisterReceiver(logReceiver) } catch (e: Exception) {}
+    }
+
+    private fun getPrivateDnsMode(): String {
+        return try {
+            Settings.Global.getString(contentResolver, "private_dns_mode") ?: "off"
+        } catch (e: Exception) { "unknown" }
+    }
+
+    private fun navigateToPrivateDnsSettings() {
+        try {
+            startActivity(Intent("android.settings.DNS_SETTINGS"))
+        } catch (e: Exception) {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    }
+
+    private fun syncServiceStates() {
+        // 1. Sync VPN Client state (Static variable check)
+        isClientRunning.value = MyVpnServiceTun2Socks.isServiceRunning
+
+        // 2. Sync Host state with Permission Check
+        val fineLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+        val nearbyDevices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else {
+            PackageManager.PERMISSION_GRANTED
+        }
+
+        if (fineLocation == PackageManager.PERMISSION_GRANTED && nearbyDevices == PackageManager.PERMISSION_GRANTED) {
+            try {
+                manager.requestGroupInfo(channel) { group ->
+                    if (group != null) {
+                        isHostRunning.value = true
+                        updateGroupInfo(group)
+                    } else {
+                        // Only set false if we're sure no group exists
+                        if (isHostRunning.value) isHostRunning.value = false
+                    }
+                }
+                manager.requestConnectionInfo(channel, this)
+            } catch (e: SecurityException) {
+                logState.add("Sync error: Permission denied")
+            }
+        }
+    }
+
+    private fun saveServiceState(hostRunning: Boolean? = null, vpnRunning: Boolean? = null) {
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            hostRunning?.let { putBoolean("host_was_running", it) }
+            vpnRunning?.let { putBoolean("vpn_was_running", it) }
+            apply()
+        }
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\MyVpnService.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Intent
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import androidx.core.app.NotificationCompat
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.*
+import java.nio.ByteBuffer
+import java.nio.channels.DatagramChannel
+import java.nio.channels.SocketChannel
+import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.thread
+
+class MyVpnService : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var isRunning = false
+    private var proxyIp = ""
+    private var proxyPort = 0
+
+    private val tcpConnections = ConcurrentHashMap<String, TcpConnection>()
+    private val udpSockets = ConcurrentHashMap<String, UdpRelay>()
+
+    // ULTRA-OPTIMIZED: Even larger pool with priority queue
+    private val fastPool = ThreadPoolExecutor(
+        50, 1000, 30L, TimeUnit.SECONDS,
+        LinkedBlockingQueue(20000),
+        ThreadFactory { r -> Thread(r).apply { priority = Thread.MAX_PRIORITY } },
+        ThreadPoolExecutor.CallerRunsPolicy()
+    )
+
+    // Separate pool for packet reading (high priority)
+    private val readerPool = Executors.newFixedThreadPool(4, ThreadFactory { r ->
+        Thread(r).apply { priority = Thread.MAX_PRIORITY; name = "PacketReader-${Thread.currentThread().id}" }
+    })
+
+    // ULTRA-OPTIMIZED: Massive queue with lock-free operations
+    private val vpnWriteQueue = LinkedBlockingQueue<ByteArray>(50000)
+    private var vpnWriter: FileOutputStream? = null
+
+    // DNS Cache to avoid repeated lookups
+    private val dnsCache = ConcurrentHashMap<String, InetAddress>()
+
+    // Connection statistics
+    private val stats = Stats()
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
+        proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
+
+        startForegroundNotification()
+
+        thread(name = "ProxyTest") {
+            if (DebugUtils.testProxyConnection(proxyIp, proxyPort)) {
+                startVpnInterface()
+            } else {
+                updateNotification("Error: Cannot reach proxy")
+                stopSelf()
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun startVpnInterface() {
+        val builder = Builder()
+            .setMtu(1500)
+            .addAddress("10.0.0.2", 32)
+            .addRoute("0.0.0.0", 0)
+            .addDisallowedApplication(packageName)
+            .addDnsServer("8.8.8.8")
+            .addDnsServer("1.1.1.1")
+            .setBlocking(false)
+            .setSession("Instagram Optimized VPN")
+
+        vpnInterface = builder.establish()
+
+        if (vpnInterface != null) {
+            isRunning = true
+            updateNotification("⚡ VPN Active - Optimized")
+
+            // Start multiple writer threads for parallel processing
+            repeat(2) { i ->
+                thread(name = "VPN-Writer-$i", isDaemon = true) { runVpnWriterUltraFast() }
+            }
+
+            // Start multiple reader threads for parallel packet processing
+            repeat(4) { i ->
+                thread(name = "VPN-Reader-$i", isDaemon = true) { readPacketsParallel() }
+            }
+
+            thread(name = "Cleanup", isDaemon = true) { cleanupStaleConnections() }
+            thread(name = "Stats", isDaemon = true) { printStats() }
+        }
+    }
+
+    // ULTRA-OPTIMIZED: Lock-free batch writing with minimal latency
+    private fun runVpnWriterUltraFast() {
+        vpnWriter = FileOutputStream(vpnInterface!!.fileDescriptor)
+        val batch = ArrayList<ByteArray>(200)
+
+        try {
+            while (isRunning) {
+                batch.clear()
+
+                // Non-blocking poll with timeout
+                val first = vpnWriteQueue.poll(5, TimeUnit.MILLISECONDS)
+                if (first != null) {
+                    batch.add(first)
+                    vpnWriteQueue.drainTo(batch, 199) // Get up to 199 more instantly
+
+                    // Write entire batch at once
+                    synchronized(vpnWriter!!) {
+                        for (packet in batch) {
+                            vpnWriter?.write(packet)
+                        }
+                        vpnWriter?.flush()
+                    }
+                    stats.packetsSent.addAndGet(batch.size)
+                }
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("VPN Writer error", e)
+        }
+    }
+
+    private fun writeToVpn(packet: ByteArray) {
+        if (!vpnWriteQueue.offer(packet)) {
+            stats.packetsDropped.incrementAndGet()
+            // Drop oldest, retry
+            vpnWriteQueue.poll()
+            vpnWriteQueue.offer(packet)
+        }
+    }
+
+    // ULTRA-OPTIMIZED: Parallel packet reading with zero-copy buffers
+    private fun readPacketsParallel() {
+        val inputStream = FileInputStream(vpnInterface!!.fileDescriptor)
+        val buffer = ByteBuffer.allocateDirect(131072) // 128KB direct buffer
+        val array = ByteArray(131072)
+
+        try {
+            while (isRunning) {
+                val length = inputStream.read(array)
+                if (length > 0) {
+                    buffer.clear()
+                    buffer.put(array, 0, length)
+                    buffer.flip()
+
+                    // Process ALL packets in this read
+                    while (buffer.hasRemaining() && buffer.remaining() >= 20) {
+                        val packetStart = buffer.position()
+                        val ipHeaderLength = (buffer.get(packetStart).toInt() and 0x0F) * 4
+
+                        if (ipHeaderLength < 20) {
+                            buffer.position(buffer.limit())
+                            break
+                        }
+
+                        val totalLength = ((buffer.get(packetStart + 2).toInt() and 0xFF) shl 8) or
+                                (buffer.get(packetStart + 3).toInt() and 0xFF)
+
+                        if (buffer.remaining() < totalLength) break
+
+                        val packetData = ByteArray(totalLength)
+                        buffer.get(packetData)
+
+                        // Submit to fast pool for processing
+                        fastPool.execute {
+                            handlePacket(ByteBuffer.wrap(packetData))
+                            stats.packetsProcessed.incrementAndGet()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("VPN Reader error", e)
+        }
+    }
+
+    private fun handlePacket(packet: ByteBuffer) {
+        if (packet.limit() < 20) return
+        val version = (packet.get(0).toInt() shr 4) and 0x0F
+        if (version != 4) return
+        val protocol = packet.get(9).toInt() and 0xFF
+
+        when (protocol) {
+            6 -> handleTcpPacket(packet)
+            17 -> handleUdpPacket(packet)
+        }
+    }
+
+    private fun handleUdpPacket(packet: ByteBuffer) {
+        try {
+            val ipHeaderLen = (packet.get(0).toInt() and 0x0F) * 4
+            val ipTotalLen = ((packet.get(2).toInt() and 0xFF) shl 8) or (packet.get(3).toInt() and 0xFF)
+            if (packet.limit() < ipHeaderLen + 8) return
+
+            val srcIp = parseIpAddress(packet, 12)
+            val destIp = parseIpAddress(packet, 16)
+            val srcPort = ((packet.get(ipHeaderLen).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 1).toInt() and 0xFF)
+            val destPort = ((packet.get(ipHeaderLen + 2).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 3).toInt() and 0xFF)
+
+            val payloadStart = ipHeaderLen + 8
+            val payloadSize = ipTotalLen - ipHeaderLen - 8
+            if (payloadSize <= 0) return
+
+            val payload = ByteArray(payloadSize)
+            packet.position(payloadStart)
+            packet.get(payload)
+
+            // OPTIMIZED: Direct UDP for DNS (faster than TCP)
+            if (destPort == 53) {
+                fastPool.execute { handleDnsDirectUdp(srcIp, srcPort, payload) }
+                return
+            }
+
+            val connectionKey = "$srcIp:$srcPort-$destIp:$destPort"
+            val relay = udpSockets.getOrPut(connectionKey) {
+                UdpRelay(connectionKey, srcIp, srcPort, destIp, destPort)
+            }
+            relay.sendData(payload)
+        } catch (e: Exception) {
+            DebugUtils.error("UDP packet error", e)
+        }
+    }
+
+    // ULTRA-OPTIMIZED: Direct UDP DNS (no SOCKS overhead)
+    private fun handleDnsDirectUdp(srcIp: String, srcPort: Int, dnsPayload: ByteArray) {
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket()
+            if (!protect(socket)) return
+            socket.soTimeout = 2000
+
+            // Send directly to Google DNS
+            val packet = DatagramPacket(dnsPayload, dnsPayload.size, InetAddress.getByName("8.8.8.8"), 53)
+            socket.send(packet)
+
+            // Receive response
+            val responseBuffer = ByteArray(512)
+            val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
+            socket.receive(responsePacket)
+
+            val response = responseBuffer.copyOf(responsePacket.length)
+            val udpResponse = buildUdpPacket("8.8.8.8", 53, srcIp, srcPort, response)
+            writeToVpn(udpResponse)
+
+            stats.dnsQueriesHandled.incrementAndGet()
+        } catch (e: Exception) {
+            DebugUtils.error("DNS Direct UDP error", e)
+        } finally {
+            socket?.close()
+        }
+    }
+
+    inner class UdpRelay(
+        private val key: String,
+        private val srcIp: String,
+        private val srcPort: Int,
+        private val destIp: String,
+        private val destPort: Int
+    ) {
+        private var socket: DatagramSocket? = null
+        @Volatile var lastActivity = System.currentTimeMillis()
+        private val running = AtomicBoolean(true)
+
+        init {
+            try {
+                socket = DatagramSocket()
+                socket?.receiveBufferSize = 524288 // 512KB
+                socket?.sendBufferSize = 524288
+                if (!this@MyVpnService.protect(socket!!)) throw Exception("Protect failed")
+                socket?.soTimeout = 10000
+                fastPool.execute { runReceiver() }
+            } catch (e: Exception) {
+                udpSockets.remove(key)
+                close()
+            }
+        }
+
+        fun sendData(payload: ByteArray) {
+            try {
+                val targetAddress = InetAddress.getByName(destIp)
+                val packet = DatagramPacket(payload, payload.size, targetAddress, destPort)
+                socket?.send(packet)
+                lastActivity = System.currentTimeMillis()
+            } catch (e: Exception) { }
+        }
+
+        private fun runReceiver() {
+            val buffer = ByteArray(16384)
+            val packet = DatagramPacket(buffer, buffer.size)
+            try {
+                while (running.get() && isRunning) {
+                    try {
+                        socket?.receive(packet)
+                        val responsePayload = packet.data.copyOf(packet.length)
+                        val response = buildUdpPacket(destIp, destPort, srcIp, srcPort, responsePayload)
+                        writeToVpn(response)
+                        lastActivity = System.currentTimeMillis()
+                    } catch (e: SocketTimeoutException) {
+                        // Normal timeout
+                    } catch (e: Exception) {
+                        break
+                    }
+                }
+            } finally {
+                udpSockets.remove(key)
+                close()
+            }
+        }
+
+        fun close() {
+            running.set(false)
+            try { socket?.close() } catch (e: Exception) {}
+        }
+    }
+
+    private fun buildUdpPacket(srcIp: String, srcPort: Int, destIp: String, destPort: Int, payload: ByteArray): ByteArray {
+        val totalLen = 28 + payload.size
+        val packet = ByteArray(totalLen)
+        packet[0] = 0x45; packet[1] = 0x00
+        packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
+        packet[6] = 0x40; packet[8] = 64; packet[9] = 17
+        fillIpAddresses(packet, srcIp, destIp)
+        val ipChecksum = calculateChecksum(packet, 0, 20)
+        packet[10] = (ipChecksum shr 8).toByte(); packet[11] = ipChecksum.toByte()
+        packet[20] = (srcPort shr 8).toByte(); packet[21] = srcPort.toByte()
+        packet[22] = (destPort shr 8).toByte(); packet[23] = destPort.toByte()
+        val udpLen = 8 + payload.size
+        packet[24] = (udpLen shr 8).toByte(); packet[25] = udpLen.toByte()
+        if (payload.isNotEmpty()) System.arraycopy(payload, 0, packet, 28, payload.size)
+        return packet
+    }
+
+    private fun handleTcpPacket(packet: ByteBuffer) {
+        try {
+            val ipHeaderLen = (packet.get(0).toInt() and 0x0F) * 4
+            val ipTotalLen = ((packet.get(2).toInt() and 0xFF) shl 8) or (packet.get(3).toInt() and 0xFF)
+            if (packet.limit() < ipHeaderLen + 20) return
+
+            val srcIp = parseIpAddress(packet, 12)
+            val destIp = parseIpAddress(packet, 16)
+            val srcPort = ((packet.get(ipHeaderLen).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 1).toInt() and 0xFF)
+            val destPort = ((packet.get(ipHeaderLen + 2).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 3).toInt() and 0xFF)
+            val tcpHeaderLen = ((packet.get(ipHeaderLen + 12).toInt() shr 4) and 0x0F) * 4
+            val tcpFlags = packet.get(ipHeaderLen + 13).toInt() and 0xFF
+            val seqNum = packet.getInt(ipHeaderLen + 4)
+            val ackNum = packet.getInt(ipHeaderLen + 8)
+            val connectionKey = "$srcIp:$srcPort-$destIp:$destPort"
+            val payloadStart = ipHeaderLen + tcpHeaderLen
+            val payloadSize = ipTotalLen - ipHeaderLen - tcpHeaderLen
+
+            val flagSYN = (tcpFlags and 0x02) != 0
+            val flagACK = (tcpFlags and 0x10) != 0
+            val flagFIN = (tcpFlags and 0x01) != 0
+            val flagRST = (tcpFlags and 0x04) != 0
+
+            when {
+                flagRST -> tcpConnections.remove(connectionKey)?.close()
+                flagSYN && !flagACK -> {
+                    if (tcpConnections.containsKey(connectionKey)) return
+                    val connection = TcpConnection(connectionKey, srcIp, srcPort, destIp, destPort, proxyIp, proxyPort, seqNum, ackNum)
+                    tcpConnections[connectionKey] = connection
+                    fastPool.execute { connection.start() }
+                    stats.tcpConnectionsCreated.incrementAndGet()
+                }
+                flagFIN -> tcpConnections[connectionKey]?.handleFIN(seqNum, ackNum)
+                payloadSize > 0 -> {
+                    val payload = ByteArray(payloadSize)
+                    packet.position(payloadStart)
+                    packet.get(payload)
+                    val conn = tcpConnections[connectionKey]
+                    if (conn != null) {
+                        if (conn.isEstablished()) conn.sendData(payload, seqNum, ackNum)
+                        else conn.queueData(payload, seqNum, ackNum)
+                    }
+                    stats.bytesTransferred.addAndGet(payloadSize.toLong())
+                }
+                flagACK -> tcpConnections[connectionKey]?.handleAck(ackNum)
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("TCP packet error", e)
+        }
+    }
+
+    private fun cleanupStaleConnections() {
+        while (isRunning) {
+            try {
+                Thread.sleep(5000) // Check every 5 seconds
+                val now = System.currentTimeMillis()
+
+                tcpConnections.values.removeIf {
+                    if (now - it.lastActivity > 120000) { // 2 minutes
+                        it.close()
+                        true
+                    } else false
+                }
+
+                udpSockets.values.removeIf {
+                    if (now - it.lastActivity > 60000) { // 1 minute
+                        it.close()
+                        true
+                    } else false
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun printStats() {
+        while (isRunning) {
+            try {
+                Thread.sleep(10000) // Every 10 seconds
+                DebugUtils.log("""
+                    === VPN STATS ===
+                    TCP Connections: ${tcpConnections.size} (${stats.tcpConnectionsCreated.get()} created)
+                    UDP Sockets: ${udpSockets.size}
+                    Packets: Sent=${stats.packetsSent.get()}, Processed=${stats.packetsProcessed.get()}, Dropped=${stats.packetsDropped.get()}
+                    DNS Queries: ${stats.dnsQueriesHandled.get()}
+                    Bytes: ${stats.bytesTransferred.get() / 1024}KB
+                    Queue: ${vpnWriteQueue.size}
+                    Pool: Active=${fastPool.activeCount}, Queue=${fastPool.queue.size}
+                """.trimIndent())
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun parseIpAddress(buffer: ByteBuffer, offset: Int): String {
+        return "${buffer.get(offset).toInt() and 0xFF}.${buffer.get(offset + 1).toInt() and 0xFF}." +
+                "${buffer.get(offset + 2).toInt() and 0xFF}.${buffer.get(offset + 3).toInt() and 0xFF}"
+    }
+
+    private fun fillIpAddresses(packet: ByteArray, srcIp: String, destIp: String) {
+        val srcParts = srcIp.split(".")
+        val destParts = destIp.split(".")
+        for(i in 0..3) packet[12+i] = srcParts[i].toInt().toByte()
+        for(i in 0..3) packet[16+i] = destParts[i].toInt().toByte()
+    }
+
+    private fun calculateChecksum(data: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0L
+        var i = offset
+        while (i < offset + length - 1) {
+            val high = (data[i].toInt() and 0xFF) shl 8
+            val low = (data[i + 1].toInt() and 0xFF)
+            sum += (high or low)
+            i += 2
+        }
+        if (i < offset + length) sum += (data[i].toInt() and 0xFF) shl 8
+        while (sum shr 16 != 0L) sum = (sum and 0xFFFF) + (sum shr 16)
+        return (sum.inv() and 0xFFFF).toInt()
+    }
+
+    data class PendingPacket(val payload: ByteArray, val seq: Int, val ack: Int)
+
+    inner class TcpConnection(
+        private val key: String,
+        private val srcIp: String,
+        private val srcPort: Int,
+        private val destIp: String,
+        private val destPort: Int,
+        private val proxyIp: String,
+        private val proxyPort: Int,
+        initialLocalSeq: Int,
+        initialRemoteSeq: Int
+    ) {
+        private var socket: Socket? = null
+        private val established = AtomicBoolean(false)
+        @Volatile var lastActivity = System.currentTimeMillis()
+        private var localSeq = initialLocalSeq.toLong()
+        private var remoteSeq = initialRemoteSeq.toLong()
+        private val pendingData = ConcurrentLinkedQueue<PendingPacket>()
+
+        fun isEstablished() = established.get()
+
+        fun queueData(payload: ByteArray, seq: Int, ack: Int) {
+            if (pendingData.size < 100) {
+                pendingData.offer(PendingPacket(payload, seq, ack))
+            }
+        }
+
+        fun start() {
+            try {
+                socket = Socket().apply {
+                    tcpNoDelay = true
+                    keepAlive = true
+                    soTimeout = 60000
+                    receiveBufferSize = 1048576 // 1MB for Instagram
+                    sendBufferSize = 1048576
+                }
+
+                if (!this@MyVpnService.protect(socket!!)) throw Exception("Protect failed")
+                socket?.connect(InetSocketAddress(proxyIp, proxyPort), 15000)
+
+                val input = socket!!.getInputStream()
+                val output = socket!!.getOutputStream()
+
+                // SOCKS5 handshake
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                val handshake = ByteArray(2)
+                if (input.read(handshake) < 2 || handshake[0] != 0x05.toByte()) {
+                    throw Exception("Handshake failed")
+                }
+
+                // SOCKS5 connect
+                val ipParts = destIp.split(".")
+                val request = ByteArray(10)
+                request[0] = 0x05; request[1] = 0x01; request[2] = 0x00; request[3] = 0x01
+                for (i in 0..3) request[4 + i] = ipParts[i].toInt().toByte()
+                request[8] = (destPort shr 8).toByte()
+                request[9] = (destPort and 0xFF).toByte()
+                output.write(request)
+                output.flush()
+
+                val response = ByteArray(10)
+                if (input.read(response) < 10 || response[1] != 0x00.toByte()) {
+                    throw Exception("Connect failed: ${response[1]}")
+                }
+
+                sendSynAck()
+                established.set(true)
+
+                // Send all pending data
+                while (pendingData.isNotEmpty()) {
+                    val pending = pendingData.poll()
+                    if (pending != null) {
+                        sendData(pending.payload, pending.seq, pending.ack)
+                    }
+                }
+
+                fastPool.execute { runReceiver(input) }
+
+            } catch (e: Exception) {
+                DebugUtils.error("[$key] Connection failed", e)
+                sendReset()
+                tcpConnections.remove(key)
+                close()
+            }
+        }
+
+        private fun runReceiver(input: java.io.InputStream) {
+            val buffer = ByteArray(32768) // 32KB buffer
+            try {
+                while (established.get() && isRunning) {
+                    val len = input.read(buffer)
+                    if (len <= 0) break
+                    sendToVpn(buffer.copyOf(len))
+                    lastActivity = System.currentTimeMillis()
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("[$key] Receiver error", e)
+            } finally {
+                tcpConnections.remove(key)
+                close()
+            }
+        }
+
+        fun sendData(payload: ByteArray, seqNum: Int, ackNum: Int) {
+            if (!established.get()) return
+            try {
+                socket?.getOutputStream()?.write(payload)
+                socket?.getOutputStream()?.flush()
+                localSeq = seqNum.toLong() + payload.size
+                val ack = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x10, byteArrayOf())
+                writeToVpn(ack)
+                lastActivity = System.currentTimeMillis()
+            } catch (e: Exception) {
+                close()
+            }
+        }
+
+        private fun sendToVpn(payload: ByteArray) {
+            val packet = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x18, payload)
+            writeToVpn(packet)
+            remoteSeq += payload.size
+        }
+
+        private fun sendSynAck() {
+            val synAck = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), (localSeq + 1).toInt(), 0x12, byteArrayOf())
+            writeToVpn(synAck)
+            remoteSeq++
+            localSeq++
+        }
+
+        fun handleFIN(seqNum: Int, ackNum: Int) {
+            localSeq = seqNum.toLong() + 1
+            val finAck = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x11, byteArrayOf())
+            writeToVpn(finAck)
+            fastPool.execute {
+                Thread.sleep(500)
+                tcpConnections.remove(key)
+                close()
+            }
+        }
+
+        fun handleAck(ackNum: Int) {
+            lastActivity = System.currentTimeMillis()
+        }
+
+        private fun sendReset() {
+            val rst = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x04, byteArrayOf())
+            writeToVpn(rst)
+        }
+
+        fun close() {
+            established.set(false)
+            try { socket?.close() } catch (e: Exception) {}
+        }
+
+        private fun buildTcpPacket(srcIp: String, srcPort: Int, destIp: String, destPort: Int, seqNum: Int, ackNum: Int, flags: Int, payload: ByteArray): ByteArray {
+            val totalLen = 40 + payload.size
+            val packet = ByteArray(totalLen)
+            packet[0] = 0x45; packet[1] = 0x00
+            packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
+            packet[6] = 0x40; packet[8] = 64; packet[9] = 6
+            fillIpAddresses(packet, srcIp, destIp)
+            val ipChecksum = calculateChecksum(packet, 0, 20)
+            packet[10] = (ipChecksum shr 8).toByte(); packet[11] = ipChecksum.toByte()
+            packet[20] = (srcPort shr 8).toByte(); packet[21] = srcPort.toByte()
+            packet[22] = (destPort shr 8).toByte(); packet[23] = destPort.toByte()
+            packet[24] = (seqNum shr 24).toByte(); packet[25] = (seqNum shr 16).toByte()
+            packet[26] = (seqNum shr 8).toByte(); packet[27] = seqNum.toByte()
+            packet[28] = (ackNum shr 24).toByte(); packet[29] = (ackNum shr 16).toByte()
+            packet[30] = (ackNum shr 8).toByte(); packet[31] = ackNum.toByte()
+            packet[32] = 0x50; packet[33] = flags.toByte()
+            packet[34] = 0xFF.toByte(); packet[35] = 0xFF.toByte()
+            if (payload.isNotEmpty()) System.arraycopy(payload, 0, packet, 40, payload.size)
+            val tcpChecksum = calculateTcpChecksum(packet, 20, 20 + payload.size, srcIp, destIp)
+            packet[36] = (tcpChecksum shr 8).toByte(); packet[37] = tcpChecksum.toByte()
+            return packet
+        }
+
+        private fun calculateTcpChecksum(packet: ByteArray, tcpOffset: Int, tcpLen: Int, srcIp: String, destIp: String): Int {
+            val pseudoHeader = ByteArray(12 + tcpLen)
+            val srcParts = srcIp.split(".")
+            val destParts = destIp.split(".")
+            for(i in 0..3) pseudoHeader[i] = srcParts[i].toInt().toByte()
+            for(i in 0..3) pseudoHeader[4+i] = destParts[i].toInt().toByte()
+            pseudoHeader[9] = 6
+            pseudoHeader[10] = (tcpLen shr 8).toByte()
+            pseudoHeader[11] = tcpLen.toByte()
+            System.arraycopy(packet, tcpOffset, pseudoHeader, 12, tcpLen)
+            return calculateChecksum(pseudoHeader, 0, pseudoHeader.size)
+        }
+    }
+
+    private fun startForegroundNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("vpn_channel", "VPN Service", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("Instagram Optimized VPN")
+            .setContentText("⚡ Ultra-fast mode active")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .build()
+        startForeground(1, notification)
+    }
+
+    private fun updateNotification(message: String) {
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("VPN Service")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(1, notification)
+    }
+
+    override fun onDestroy() {
+        isRunning = false
+        fastPool.shutdownNow()
+        readerPool.shutdownNow()
+        tcpConnections.values.forEach { it.close() }
+        tcpConnections.clear()
+        udpSockets.values.forEach { it.close() }
+        udpSockets.clear()
+        vpnWriter?.close()
+        vpnInterface?.close()
+        super.onDestroy()
+    }
+
+    // Statistics tracking
+    class Stats {
+        val packetsSent = AtomicInteger(0)
+        val packetsProcessed = AtomicInteger(0)
+        val packetsDropped = AtomicInteger(0)
+        val tcpConnectionsCreated = AtomicInteger(0)
+        val dnsQueriesHandled = AtomicInteger(0)
+        val bytesTransferred = AtomicLong(0L) // Changed from AtomicInteger to AtomicLong
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\Myvpnserviceoptimized.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Intent
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import androidx.core.app.NotificationCompat
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.Socket
+import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+
+class MyVpnServiceOptimized : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var isRunning = false
+    private var proxyIp = ""
+    private var proxyPort = 0
+
+    private val tcpConnections = ConcurrentHashMap<String, TcpConnection>()
+    private val udpSockets = ConcurrentHashMap<String, UdpRelay>()
+
+    // **OPTIMIZATION 1: DNS Cache**
+    private val dnsCache = DnsCache()
+
+    // **OPTIMIZATION 2: Reuse DNS connections**
+    private val dnsConnectionPool = ConcurrentHashMap<String, Socket>()
+
+    private val connectionPool = ThreadPoolExecutor(
+        20, 500, 60L, TimeUnit.SECONDS,
+        LinkedBlockingQueue(5000), ThreadPoolExecutor.CallerRunsPolicy()
+    )
+
+    private val vpnWriteQueue = LinkedBlockingQueue<ByteArray>(10000)
+    private var vpnWriter: FileOutputStream? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
+        proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
+
+        startForegroundNotification()
+
+        thread(name = "ProxyTest") {
+            if (DebugUtils.testProxyConnection(proxyIp, proxyPort)) {
+                startVpnInterface()
+            } else {
+                updateNotification("Error: Cannot reach Phone A")
+                stopSelf()
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun startVpnInterface() {
+        val builder = Builder()
+            .setMtu(1500)
+            .addAddress("10.0.0.2", 32)
+            .addRoute("0.0.0.0", 0)
+            .addDisallowedApplication(packageName)
+            .addDnsServer("8.8.8.8")
+            .addDnsServer("8.8.4.4")
+            .setBlocking(false)
+
+        vpnInterface = builder.establish()
+
+        if (vpnInterface != null) {
+            isRunning = true
+            updateNotification("VPN Active - Optimized")
+            thread(name = "VPN-Writer", isDaemon = true) { runVpnWriterOptimized() }
+            thread(name = "VPN-Reader", isDaemon = true) { readPacketsOptimized() }
+            thread(name = "Cleanup", isDaemon = true) { cleanupStaleConnections() }
+        }
+    }
+
+    private fun runVpnWriterOptimized() {
+        vpnWriter = FileOutputStream(vpnInterface!!.fileDescriptor)
+        val batch = ArrayList<ByteArray>(100)
+        try {
+            while (isRunning) {
+                batch.clear()
+                val first = vpnWriteQueue.poll(10, TimeUnit.MILLISECONDS)
+                if (first != null) {
+                    batch.add(first)
+                    vpnWriteQueue.drainTo(batch, 99)
+
+                    for (packet in batch) {
+                        vpnWriter?.write(packet)
+                    }
+                    vpnWriter?.flush()
+                }
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("VPN Writer error", e)
+        }
+    }
+
+    private fun writeToVpn(packet: ByteArray) {
+        if (!vpnWriteQueue.offer(packet)) {
+            vpnWriteQueue.poll()
+            vpnWriteQueue.offer(packet)
+        }
+    }
+
+    private fun readPacketsOptimized() {
+        val inputStream = FileInputStream(vpnInterface!!.fileDescriptor)
+        val buffer = ByteBuffer.allocateDirect(65536)
+        val array = ByteArray(65536)
+
+        try {
+            while (isRunning) {
+                val length = inputStream.read(array)
+                if (length > 0) {
+                    buffer.clear()
+                    buffer.put(array, 0, length)
+                    buffer.flip()
+
+                    while (buffer.hasRemaining() && buffer.remaining() >= 20) {
+                        val packetStart = buffer.position()
+                        val ipHeaderLength = (buffer.get(packetStart).toInt() and 0x0F) * 4
+                        val totalLength = ((buffer.get(packetStart + 2).toInt() and 0xFF) shl 8) or
+                                (buffer.get(packetStart + 3).toInt() and 0xFF)
+
+                        if (buffer.remaining() < totalLength) break
+
+                        val packetData = ByteArray(totalLength)
+                        buffer.get(packetData)
+
+                        val packet = ByteBuffer.wrap(packetData)
+                        connectionPool.execute { handlePacket(packet) }
+                    }
+
+                    buffer.clear()
+                }
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("VPN Reader error", e)
+        }
+    }
+
+    private fun handlePacket(packet: ByteBuffer) {
+        if (packet.limit() < 20) return
+        val version = (packet.get(0).toInt() shr 4) and 0x0F
+        if (version != 4) return
+        val protocol = packet.get(9).toInt() and 0xFF
+
+        when (protocol) {
+            6 -> handleTcpPacket(packet)
+            17 -> handleUdpPacket(packet)
+        }
+    }
+
+    private fun handleUdpPacket(packet: ByteBuffer) {
+        try {
+            val ipHeaderLen = (packet.get(0).toInt() and 0x0F) * 4
+            val ipTotalLen = ((packet.get(2).toInt() and 0xFF) shl 8) or (packet.get(3).toInt() and 0xFF)
+            if (packet.limit() < ipHeaderLen + 8) return
+
+            val srcIp = parseIpAddress(packet, 12)
+            val destIp = parseIpAddress(packet, 16)
+            val srcPort = ((packet.get(ipHeaderLen).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 1).toInt() and 0xFF)
+            val destPort = ((packet.get(ipHeaderLen + 2).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 3).toInt() and 0xFF)
+
+            val payloadStart = ipHeaderLen + 8
+            val payloadSize = ipTotalLen - ipHeaderLen - 8
+            if (payloadSize <= 0) return
+
+            val payload = ByteArray(payloadSize)
+            packet.position(payloadStart)
+            packet.get(payload)
+
+            if (destPort == 53) {
+                // **OPTIMIZATION 3: Fast DNS handling with cache**
+                handleDnsOptimized(srcIp, srcPort, destIp, destPort, payload)
+                return
+            }
+
+            val connectionKey = "$srcIp:$srcPort-$destIp:$destPort"
+            val relay = udpSockets.getOrPut(connectionKey) { UdpRelay(connectionKey, srcIp, srcPort, destIp, destPort) }
+            relay.sendData(payload)
+        } catch (e: Exception) { }
+    }
+
+    // **OPTIMIZATION 4: Dramatically faster DNS with caching**
+    private fun handleDnsOptimized(srcIp: String, srcPort: Int, destIp: String, destPort: Int, dnsPayload: ByteArray) {
+        // Try to extract domain name from DNS query to check cache
+        val domain = extractDomainFromDnsQuery(dnsPayload)
+
+        if (domain != null) {
+            val cachedIp = dnsCache.get(domain)
+            if (cachedIp != null) {
+                // Cache hit! Return immediately without network call
+                DebugUtils.log("DNS Cache HIT: $domain")
+                val response = buildDnsResponse(dnsPayload, cachedIp)
+                val udpResponse = buildUdpPacket(destIp, destPort, srcIp, srcPort, response)
+                writeToVpn(udpResponse)
+                return
+            }
+            DebugUtils.log("DNS Cache MISS: $domain")
+        }
+
+        // Cache miss or couldn't parse - do actual DNS lookup
+        // Use connection pool instead of creating new thread each time
+        connectionPool.execute {
+            var dnsSocket: Socket? = null
+            try {
+                dnsSocket = Socket()
+                if (!protect(dnsSocket)) return@execute
+                dnsSocket.soTimeout = 2000 // Reduced timeout
+                dnsSocket.connect(InetSocketAddress(proxyIp, proxyPort), 2000)
+                val out = dnsSocket.getOutputStream()
+                val ins = dnsSocket.getInputStream()
+
+                out.write(byteArrayOf(0x05, 0x01, 0x00))
+                ins.read(ByteArray(2))
+
+                val request = byteArrayOf(0x05, 0x01, 0x00, 0x01, 8, 8, 8, 8, 0x00, 0x35)
+                out.write(request)
+                ins.read(ByteArray(10))
+
+                val len = dnsPayload.size
+                out.write(byteArrayOf((len shr 8).toByte(), (len and 0xFF).toByte()))
+                out.write(dnsPayload)
+                out.flush()
+
+                val b1 = ins.read(); val b2 = ins.read()
+                if (b1 != -1 && b2 != -1) {
+                    val respLen = ((b1 and 0xFF) shl 8) or (b2 and 0xFF)
+                    val respBody = ByteArray(respLen)
+                    var totalRead = 0
+                    while (totalRead < respLen) {
+                        val r = ins.read(respBody, totalRead, respLen - totalRead)
+                        if (r == -1) break
+                        totalRead += r
+                    }
+
+                    // **Cache the result for next time**
+                    if (domain != null) {
+                        val ipAddress = extractIpFromDnsResponse(respBody)
+                        if (ipAddress != null) {
+                            dnsCache.put(domain, ipAddress)
+                            DebugUtils.log("DNS Cached: $domain -> ${ipAddress.joinToString(".")}")
+                        }
+                    }
+
+                    val udpResponse = buildUdpPacket(destIp, destPort, srcIp, srcPort, respBody)
+                    writeToVpn(udpResponse)
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("DNS lookup failed", e)
+            } finally {
+                try { dnsSocket?.close() } catch (e: Exception) {}
+            }
+        }
+    }
+
+    // Extract domain name from DNS query packet
+    private fun extractDomainFromDnsQuery(dnsPayload: ByteArray): String? {
+        try {
+            if (dnsPayload.size < 13) return null
+
+            var pos = 12 // Skip header
+            val parts = mutableListOf<String>()
+
+            while (pos < dnsPayload.size) {
+                val len = dnsPayload[pos].toInt() and 0xFF
+                if (len == 0) break
+                if (len > 63 || pos + len >= dnsPayload.size) return null
+
+                val part = String(dnsPayload, pos + 1, len, Charsets.UTF_8)
+                parts.add(part)
+                pos += len + 1
+            }
+
+            return if (parts.isEmpty()) null else parts.joinToString(".")
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    // Extract IP address from DNS response
+    private fun extractIpFromDnsResponse(response: ByteArray): ByteArray? {
+        try {
+            // Simple A record extraction (IPv4)
+            // This is a simplified parser - real DNS responses are complex
+            var pos = 12
+
+            // Skip question section
+            while (pos < response.size && response[pos].toInt() != 0) {
+                pos++
+            }
+            pos += 5 // Skip null terminator + QTYPE + QCLASS
+
+            // Look for answer with type A (0x0001)
+            while (pos + 12 < response.size) {
+                // Check if this is a pointer (compression)
+                if ((response[pos].toInt() and 0xC0) == 0xC0) {
+                    pos += 2 // Skip pointer
+                } else {
+                    // Skip name
+                    while (pos < response.size && response[pos].toInt() != 0) pos++
+                    pos++
+                }
+
+                if (pos + 10 > response.size) break
+
+                val type = ((response[pos].toInt() and 0xFF) shl 8) or (response[pos + 1].toInt() and 0xFF)
+                val dataLen = ((response[pos + 8].toInt() and 0xFF) shl 8) or (response[pos + 9].toInt() and 0xFF)
+
+                if (type == 1 && dataLen == 4) { // A record
+                    return byteArrayOf(
+                        response[pos + 10],
+                        response[pos + 11],
+                        response[pos + 12],
+                        response[pos + 13]
+                    )
+                }
+
+                pos += 10 + dataLen
+            }
+        } catch (e: Exception) {
+        }
+        return null
+    }
+
+    // Build DNS response from cached IP
+    private fun buildDnsResponse(query: ByteArray, ipAddress: ByteArray): ByteArray {
+        // Simple DNS response builder
+        val response = ByteArray(query.size + 16)
+
+        // Copy query as base
+        System.arraycopy(query, 0, response, 0, query.size)
+
+        // Set flags: response + authoritative
+        response[2] = 0x81.toByte()
+        response[3] = 0x80.toByte()
+
+        // Answer count = 1
+        response[6] = 0x00
+        response[7] = 0x01
+
+        // Add answer section at end
+        var pos = query.size
+        response[pos++] = 0xC0.toByte() // Pointer to question name
+        response[pos++] = 0x0C.toByte()
+        response[pos++] = 0x00 // Type A
+        response[pos++] = 0x01
+        response[pos++] = 0x00 // Class IN
+        response[pos++] = 0x01
+        response[pos++] = 0x00 // TTL (1 hour)
+        response[pos++] = 0x00
+        response[pos++] = 0x00
+        response[pos++] = 0xE1.toByte()
+        response[pos++] = 0x00 // Data length
+        response[pos++] = 0x04
+        // IP address
+        System.arraycopy(ipAddress, 0, response, pos, 4)
+
+        return response.copyOf(pos + 4)
+    }
+
+    // ... Rest of the class remains the same (UDP relay, TCP connection, helper methods) ...
+    // I'll include the critical parts below:
+
+    inner class UdpRelay(private val key: String, private val srcIp: String, private val srcPort: Int, private val destIp: String, private val destPort: Int) {
+        private var socket: DatagramSocket? = null
+        @Volatile var lastActivity = System.currentTimeMillis()
+        private val running = AtomicBoolean(true)
+
+        init {
+            try {
+                socket = DatagramSocket()
+                socket?.receiveBufferSize = 262144
+                socket?.sendBufferSize = 262144
+                if (!this@MyVpnServiceOptimized.protect(socket!!)) throw Exception("Protect failed")
+                socket?.soTimeout = 5000
+                connectionPool.execute { runReceiver() }
+            } catch (e: Exception) { udpSockets.remove(key); close() }
+        }
+
+        fun sendData(payload: ByteArray) {
+            try {
+                val targetAddress = InetAddress.getByName(destIp)
+                val packet = DatagramPacket(payload, payload.size, targetAddress, destPort)
+                socket?.send(packet)
+                lastActivity = System.currentTimeMillis()
+            } catch (e: Exception) { }
+        }
+
+        private fun runReceiver() {
+            val buffer = ByteArray(8192)
+            val packet = DatagramPacket(buffer, buffer.size)
+            try {
+                while (running.get() && isRunning) {
+                    try {
+                        socket?.receive(packet)
+                        val responsePayload = packet.data.copyOf(packet.length)
+                        val response = buildUdpPacket(destIp, destPort, srcIp, srcPort, responsePayload)
+                        writeToVpn(response)
+                        lastActivity = System.currentTimeMillis()
+                    } catch (e: java.net.SocketTimeoutException) { } catch (e: Exception) { break }
+                }
+            } finally { udpSockets.remove(key); close() }
+        }
+
+        fun close() { running.set(false); try { socket?.close() } catch (e: Exception) {} }
+    }
+
+    private fun buildUdpPacket(srcIp: String, srcPort: Int, destIp: String, destPort: Int, payload: ByteArray): ByteArray {
+        val totalLen = 28 + payload.size
+        val packet = ByteArray(totalLen)
+        packet[0] = 0x45; packet[1] = 0x00; packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
+        packet[6] = 0x40; packet[8] = 64; packet[9] = 17
+        fillIpAddresses(packet, srcIp, destIp)
+        val ipChecksum = calculateChecksum(packet, 0, 20)
+        packet[10] = (ipChecksum shr 8).toByte(); packet[11] = ipChecksum.toByte()
+        packet[20] = (srcPort shr 8).toByte(); packet[21] = srcPort.toByte()
+        packet[22] = (destPort shr 8).toByte(); packet[23] = destPort.toByte()
+        val udpLen = 8 + payload.size
+        packet[24] = (udpLen shr 8).toByte(); packet[25] = udpLen.toByte()
+        if (payload.isNotEmpty()) System.arraycopy(payload, 0, packet, 28, payload.size)
+        return packet
+    }
+
+    // Continue with TCP handling and other methods from original...
+    // (Include handleTcpPacket, TcpConnection class, cleanup methods, etc.)
+
+    private fun handleTcpPacket(packet: ByteBuffer) {
+        // Same as original implementation
+        try {
+            val ipHeaderLen = (packet.get(0).toInt() and 0x0F) * 4
+            val ipTotalLen = ((packet.get(2).toInt() and 0xFF) shl 8) or (packet.get(3).toInt() and 0xFF)
+            if (packet.limit() < ipHeaderLen + 20) return
+
+            val srcIp = parseIpAddress(packet, 12)
+            val destIp = parseIpAddress(packet, 16)
+            val srcPort = ((packet.get(ipHeaderLen).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 1).toInt() and 0xFF)
+            val destPort = ((packet.get(ipHeaderLen + 2).toInt() and 0xFF) shl 8) or (packet.get(ipHeaderLen + 3).toInt() and 0xFF)
+            val tcpHeaderLen = ((packet.get(ipHeaderLen + 12).toInt() shr 4) and 0x0F) * 4
+            val tcpFlags = packet.get(ipHeaderLen + 13).toInt() and 0xFF
+            val seqNum = packet.getInt(ipHeaderLen + 4)
+            val ackNum = packet.getInt(ipHeaderLen + 8)
+            val connectionKey = "$srcIp:$srcPort-$destIp:$destPort"
+            val payloadStart = ipHeaderLen + tcpHeaderLen
+            val payloadSize = ipTotalLen - ipHeaderLen - tcpHeaderLen
+
+            val flagSYN = (tcpFlags and 0x02) != 0
+            val flagACK = (tcpFlags and 0x10) != 0
+            val flagFIN = (tcpFlags and 0x01) != 0
+            val flagRST = (tcpFlags and 0x04) != 0
+
+            when {
+                flagRST -> tcpConnections.remove(connectionKey)?.close()
+                flagSYN && !flagACK -> {
+                    if (tcpConnections.containsKey(connectionKey)) return
+                    val connection = TcpConnection(connectionKey, srcIp, srcPort, destIp, destPort, proxyIp, proxyPort, seqNum, ackNum)
+                    tcpConnections[connectionKey] = connection
+                    connectionPool.execute { connection.start() }
+                }
+                flagFIN -> tcpConnections[connectionKey]?.handleFIN(seqNum, ackNum)
+                payloadSize > 0 -> {
+                    val payload = ByteArray(payloadSize)
+                    packet.position(payloadStart)
+                    packet.get(payload)
+                    val conn = tcpConnections[connectionKey]
+                    if (conn != null) {
+                        if (conn.isEstablished()) conn.sendData(payload, seqNum, ackNum)
+                        else conn.queueData(payload, seqNum, ackNum)
+                    }
+                }
+                flagACK -> tcpConnections[connectionKey]?.handleAck(ackNum)
+            }
+        } catch (e: Exception) { }
+    }
+
+    private fun cleanupStaleConnections() {
+        while (isRunning) {
+            try {
+                Thread.sleep(10000)
+                val now = System.currentTimeMillis()
+                tcpConnections.values.removeIf { if (now - it.lastActivity > 60000) { it.close(); true } else false }
+                udpSockets.values.removeIf { if (now - it.lastActivity > 30000) { it.close(); true } else false }
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun parseIpAddress(buffer: ByteBuffer, offset: Int): String {
+        return "${buffer.get(offset).toInt() and 0xFF}.${buffer.get(offset + 1).toInt() and 0xFF}.${buffer.get(offset + 2).toInt() and 0xFF}.${buffer.get(offset + 3).toInt() and 0xFF}"
+    }
+
+    private fun fillIpAddresses(packet: ByteArray, srcIp: String, destIp: String) {
+        val srcParts = srcIp.split("."); val destParts = destIp.split(".")
+        for(i in 0..3) packet[12+i] = srcParts[i].toInt().toByte()
+        for(i in 0..3) packet[16+i] = destParts[i].toInt().toByte()
+    }
+
+    private fun calculateChecksum(data: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0L; var i = offset
+        while (i < offset + length - 1) {
+            val high = (data[i].toInt() and 0xFF) shl 8
+            val low = (data[i + 1].toInt() and 0xFF)
+            sum += (high or low)
+            i += 2
+        }
+        if (i < offset + length) sum += (data[i].toInt() and 0xFF) shl 8
+        while (sum shr 16 != 0L) sum = (sum and 0xFFFF) + (sum shr 16)
+        return (sum.inv() and 0xFFFF).toInt()
+    }
+
+    data class PendingPacket(val payload: ByteArray, val seq: Int, val ack: Int)
+
+    inner class TcpConnection(
+        private val key: String, private val srcIp: String, private val srcPort: Int, private val destIp: String, private val destPort: Int,
+        private val proxyIp: String, private val proxyPort: Int, initialLocalSeq: Int, initialRemoteSeq: Int
+    ) {
+        private var socket: Socket? = null
+        private val established = AtomicBoolean(false)
+        @Volatile var lastActivity = System.currentTimeMillis()
+        private var localSeq = initialLocalSeq.toLong()
+        private var remoteSeq = initialRemoteSeq.toLong()
+        private val pendingData = ArrayList<PendingPacket>()
+
+        fun isEstablished() = established.get()
+        fun queueData(payload: ByteArray, seq: Int, ack: Int) {
+            synchronized(pendingData) {
+                if (pendingData.size < 50) pendingData.add(PendingPacket(payload, seq, ack))
+            }
+        }
+
+        fun start() {
+            try {
+                socket = Socket().apply {
+                    tcpNoDelay = true
+                    keepAlive = true
+                    soTimeout = 30000
+                    receiveBufferSize = 524288
+                    sendBufferSize = 524288
+                }
+                if (!this@MyVpnServiceOptimized.protect(socket!!)) throw Exception("Protect failed")
+                socket?.connect(InetSocketAddress(proxyIp, proxyPort), 10000)
+                val input = socket!!.getInputStream(); val output = socket!!.getOutputStream()
+
+                output.write(byteArrayOf(0x05, 0x01, 0x00)); output.flush()
+                val handshake = ByteArray(2); if (input.read(handshake) < 2 || handshake[0] != 0x05.toByte()) throw Exception("Handshake failed")
+
+                val ipParts = destIp.split(".")
+                val request = ByteArray(10)
+                request[0] = 0x05; request[1] = 0x01; request[2] = 0x00; request[3] = 0x01
+                for (i in 0..3) request[4 + i] = ipParts[i].toInt().toByte()
+                request[8] = (destPort shr 8).toByte(); request[9] = (destPort and 0xFF).toByte()
+                output.write(request); output.flush()
+
+                val response = ByteArray(10); if (input.read(response) < 10 || response[1] != 0x00.toByte()) throw Exception("Connect failed")
+
+                sendSynAck()
+                established.set(true)
+                synchronized(pendingData) { for (pending in pendingData) sendData(pending.payload, pending.seq, pending.ack); pendingData.clear() }
+                connectionPool.execute { runReceiver(input) }
+            } catch (e: Exception) { sendReset(); tcpConnections.remove(key); close() }
+        }
+
+        private fun runReceiver(input: java.io.InputStream) {
+            val buffer = ByteArray(8192)
+            try {
+                while (established.get() && isRunning) {
+                    val len = input.read(buffer)
+                    if (len <= 0) break
+                    sendToVpn(buffer.copyOf(len))
+                    lastActivity = System.currentTimeMillis()
+                }
+            } catch (e: Exception) { } finally { tcpConnections.remove(key); close() }
+        }
+
+        fun sendData(payload: ByteArray, seqNum: Int, ackNum: Int) {
+            if (!established.get()) return
+            try {
+                socket?.getOutputStream()?.write(payload)
+                socket?.getOutputStream()?.flush()
+                localSeq = seqNum.toLong() + payload.size
+                val ack = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x10, byteArrayOf())
+                writeToVpn(ack)
+                lastActivity = System.currentTimeMillis()
+            } catch (e: Exception) { close() }
+        }
+
+        private fun sendToVpn(payload: ByteArray) {
+            val packet = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x18, payload)
+            writeToVpn(packet)
+            remoteSeq += payload.size
+        }
+
+        private fun sendSynAck() {
+            val synAck = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), (localSeq + 1).toInt(), 0x12, byteArrayOf())
+            writeToVpn(synAck)
+            remoteSeq++; localSeq++
+        }
+
+        fun handleFIN(seqNum: Int, ackNum: Int) {
+            localSeq = seqNum.toLong() + 1
+            val finAck = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x11, byteArrayOf())
+            writeToVpn(finAck)
+            connectionPool.execute { Thread.sleep(500); tcpConnections.remove(key); close() }
+        }
+
+        fun handleAck(ackNum: Int) { lastActivity = System.currentTimeMillis() }
+
+        private fun sendReset() {
+            val rst = buildTcpPacket(destIp, destPort, srcIp, srcPort, remoteSeq.toInt(), localSeq.toInt(), 0x04, byteArrayOf())
+            writeToVpn(rst)
+        }
+
+        fun close() { established.set(false); try { socket?.close() } catch (e: Exception) {} }
+
+        private fun buildTcpPacket(srcIp: String, srcPort: Int, destIp: String, destPort: Int, seqNum: Int, ackNum: Int, flags: Int, payload: ByteArray): ByteArray {
+            val totalLen = 40 + payload.size
+            val packet = ByteArray(totalLen)
+            packet[0] = 0x45; packet[1] = 0x00; packet[2] = (totalLen shr 8).toByte(); packet[3] = totalLen.toByte()
+            packet[6] = 0x40; packet[8] = 64; packet[9] = 6
+            fillIpAddresses(packet, srcIp, destIp)
+            val ipChecksum = calculateChecksum(packet, 0, 20)
+            packet[10] = (ipChecksum shr 8).toByte(); packet[11] = ipChecksum.toByte()
+            packet[20] = (srcPort shr 8).toByte(); packet[21] = srcPort.toByte()
+            packet[22] = (destPort shr 8).toByte(); packet[23] = destPort.toByte()
+            packet[24] = (seqNum shr 24).toByte(); packet[25] = (seqNum shr 16).toByte(); packet[26] = (seqNum shr 8).toByte(); packet[27] = seqNum.toByte()
+            packet[28] = (ackNum shr 24).toByte(); packet[29] = (ackNum shr 16).toByte(); packet[30] = (ackNum shr 8).toByte(); packet[31] = ackNum.toByte()
+            packet[32] = 0x50; packet[33] = flags.toByte();
+            packet[34] = 0xFF.toByte(); packet[35] = 0xFF.toByte()
+            if (payload.isNotEmpty()) System.arraycopy(payload, 0, packet, 40, payload.size)
+            val tcpChecksum = calculateTcpChecksum(packet, 20, 20 + payload.size, srcIp, destIp)
+            packet[36] = (tcpChecksum shr 8).toByte(); packet[37] = tcpChecksum.toByte()
+            return packet
+        }
+
+        private fun calculateTcpChecksum(packet: ByteArray, tcpOffset: Int, tcpLen: Int, srcIp: String, destIp: String): Int {
+            val pseudoHeader = ByteArray(12 + tcpLen)
+            val srcParts = srcIp.split("."); val destParts = destIp.split(".")
+            for(i in 0..3) pseudoHeader[i] = srcParts[i].toInt().toByte()
+            for(i in 0..3) pseudoHeader[4+i] = destParts[i].toInt().toByte()
+            pseudoHeader[9] = 6; pseudoHeader[10] = (tcpLen shr 8).toByte(); pseudoHeader[11] = tcpLen.toByte()
+            System.arraycopy(packet, tcpOffset, pseudoHeader, 12, tcpLen)
+            return calculateChecksum(pseudoHeader, 0, pseudoHeader.size)
+        }
+    }
+
+    private fun startForegroundNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("vpn_channel", "VPN Service", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("VPN Running")
+            .setContentText("DNS Cache: ${dnsCache.size()} entries")
+            .setSmallIcon(android.R.drawable.ic_dialog_info).build()
+        startForeground(1, notification)
+    }
+
+    private fun updateNotification(message: String) {
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("VPN Service")
+            .setContentText("$message | DNS: ${dnsCache.size()}")
+            .setSmallIcon(android.R.drawable.ic_dialog_info).build()
+        getSystemService(NotificationManager::class.java).notify(1, notification)
+    }
+
+    override fun onDestroy() {
+        isRunning = false; connectionPool.shutdownNow()
+        tcpConnections.values.forEach { it.close() }; tcpConnections.clear()
+        udpSockets.values.forEach { it.close() }; udpSockets.clear()
+        dnsCache.clear()
+        vpnWriter?.close(); vpnInterface?.close()
+        super.onDestroy()
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\Myvpnservicetun2socks.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import androidx.core.app.NotificationCompat
+import engine.Engine
+import kotlin.concurrent.thread
+
+class MyVpnServiceTun2Socks : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var isRunning = false
+    private var proxyIp = ""
+    private var proxyPort = 0
+
+    companion object {
+        const val ACTION_STOP = "com.example.hotspot_bypass_vpn.STOP"
+        var isServiceRunning = false // ADD THIS
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            isServiceRunning = false // SET FALSE
+            DebugUtils.log("Stop Action Received via Intent")
+            shutdownService()
+            return START_NOT_STICKY
+        }
+        isServiceRunning = true // SET TRUE
+
+        if (isRunning) {
+            DebugUtils.log("Service already running - resetting connections")
+            resetConnections()
+        }
+
+        proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
+        proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
+
+        startForegroundNotification()
+
+        thread(name = "ProxyTest") {
+            if (DebugUtils.testProxyConnection(proxyIp, proxyPort)) {
+                startVpnWithTun2Socks()
+            } else {
+                updateNotification("Error: Cannot reach proxy at $proxyIp:$proxyPort")
+                stopSelf()
+            }
+        }
+
+        return START_STICKY
+    }
+
+    private fun resetConnections() {
+        try {
+            Engine.stop()
+            Thread.sleep(500)
+            vpnInterface?.close()
+            vpnInterface = null
+            DebugUtils.log("✓ Connections reset")
+        } catch (e: Exception) {
+            DebugUtils.error("Error resetting connections", e)
+        }
+    }
+
+    private fun shutdownService() {
+        isRunning = false
+
+        // 1. Close the interface first to drop the system VPN route
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+        } catch (e: Exception) {}
+
+        // 2. Stop the native engine
+        try {
+            Engine.stop()
+        } catch (e: Exception) {}
+
+        // 3. Remove foreground status and stop
+        stopForeground(true)
+        stopSelf()
+
+        DebugUtils.log("Service shutdown sequence complete")
+    }
+
+    private fun startVpnWithTun2Socks() {
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+            Thread.sleep(500)
+
+            DebugUtils.log("Setting up fresh VPN interface...")
+
+            DebugUtils.log("Setting up VPN interface...")
+
+            val builder = Builder()
+                .setMtu(1350) // LOWER MTU: 1350 is the "sweet spot" for gaming over proxies
+                .addAddress("10.0.0.2", 24)
+                .addRoute("0.0.0.0", 0) // Route EVERYTHING
+                // .addRoute("::", 0) // Uncomment if you want to block IPv6 leaks
+                .addDisallowedApplication(packageName)
+                .addDnsServer("8.8.8.8")
+                .addDnsServer("1.1.1.1")
+                .setSession("Hotspot Bypass VPN")
+                .setBlocking(true) // Crucial for gaming stability
+
+            vpnInterface = builder.establish()
+
+            if (vpnInterface == null) {
+                DebugUtils.error("Failed to establish VPN interface")
+                updateNotification("Error: VPN interface creation failed")
+                stopSelf()
+                return
+            }
+
+            val fd = vpnInterface!!.fd
+            DebugUtils.log("VPN interface established with fd: $fd")
+
+            isRunning = true
+            updateNotification("VPN Active - Routing through tun2socks")
+
+            // Start tun2socks in a separate thread
+            thread(name = "tun2socks-engine", isDaemon = false) {
+                runTun2Socks(fd)
+            }
+
+        } catch (e: Exception) {
+            DebugUtils.error("Failed to start VPN", e)
+            updateNotification("Error: ${e.message}")
+            stopSelf()
+        }
+    }
+
+    private fun runTun2Socks(fd: Int) {
+        try {
+            val socksProxy = "socks5://$proxyIp:$proxyPort"
+
+            DebugUtils.log("Configuring tun2socks engine...")
+
+            // 1. Create a Key object for configuration
+            val key = engine.Key()
+
+            // 2. Set the parameters using the Key object
+            // Note: The device must be "fd://<number>" for Android
+            key.setDevice("fd://$fd")
+            key.setProxy(socksProxy)
+            key.setMTU(1420L)
+            key.setLogLevel("info")
+
+            // Optional: Some versions allow setting DNS here,
+            // but often it's handled by the VPN Builder routes
+            // key.setDNS("8.8.8.8,8.8.4.4")
+
+            // 3. Register the configuration and start the engine
+            Engine.insert(key)
+            Engine.start()
+
+            DebugUtils.log("✓ tun2socks started successfully!")
+            updateNotification("✓ VPN Active - Connected to $proxyIp:$proxyPort")
+
+            // Keep the thread alive while VPN is running
+            while (isRunning) {
+                Thread.sleep(500)
+            }
+
+        } catch (e: Exception) {
+            DebugUtils.error("tun2socks error", e)
+            updateNotification("Error: ${e.message}")
+        } finally {
+            DebugUtils.log("tun2socks engine stopped")
+        }
+    }
+
+    private fun startForegroundNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "vpn_channel",
+                "VPN Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("Hotspot Bypass VPN")
+            .setContentText("Initializing tun2socks...")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        startForeground(1, notification)
+    }
+
+    private fun updateNotification(message: String) {
+        val notification = NotificationCompat.Builder(this, "vpn_channel")
+            .setContentTitle("Hotspot Bypass VPN")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        getSystemService(NotificationManager::class.java).notify(1, notification)
+    }
+
+    override fun onDestroy() {
+        DebugUtils.log("CRITICAL: Executing Stop Sequence...")
+        isServiceRunning = false // SET FALSE
+
+        // 1. FORCIBLY close the VPN Interface first
+        // This tells the Android OS to immediately remove the VPN routes
+        try {
+            vpnInterface?.close()
+            vpnInterface = null
+            DebugUtils.log("✓ VPN Interface closed (Routing removed)")
+        } catch (e: Exception) {
+            DebugUtils.error("Error closing interface", e)
+        }
+
+        // 2. Stop the tun2socks Engine
+        try {
+            Engine.stop()
+            DebugUtils.log("✓ tun2socks engine stopped")
+        } catch (e: Exception) {
+            DebugUtils.error("Error stopping engine", e)
+        }
+
+        // 3. Clean up notifications
+        stopForeground(true)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(1)
+
+        DebugUtils.log("VPN Service fully destroyed")
+
+        // 4. Final safety: Kill the process if it's stuck
+        // (Optional: Only use if the above doesn't work)
+        // android.os.Process.killProcess(android.os.Process.myPid())
+
+        super.onDestroy()
+
+        thread {
+            Thread.sleep(1000)
+            if (!isRunning) {
+                // If the app is only used for VPN, you can kill the process
+                // to ensure the SOCKS engine is dead.
+                // android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
+    }
+
+
+    override fun onRevoke() {
+        DebugUtils.log("VPN Permission revoked by system")
+        stopSelf()
+        super.onRevoke()
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\ProxyServer.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.util.Log
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.*
+import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
+
+class ProxyServer {
+    private var serverSocket: ServerSocket? = null
+    private var isRunning = false
+    private val PORT = 8080
+
+    private var clientPool: ThreadPoolExecutor? = null
+    private val udpRelays = ConcurrentHashMap<String, UdpAssociation>()
+
+    // Statistics
+    private val activeConnections = AtomicInteger(0)
+    private val totalConnections = AtomicInteger(0)
+
+    fun start() {
+        if (isRunning) {
+            Log.w("ProxyServer", "Server already running")
+            return
+        }
+        isRunning = true
+
+        clientPool = ThreadPoolExecutor(
+            100,
+            2000,
+            60L,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(10000),
+            ThreadFactory { r -> Thread(r).apply {
+                priority = Thread.NORM_PRIORITY + 1
+                name = "Proxy-${Thread.currentThread().id}"
+            }},
+            ThreadPoolExecutor.CallerRunsPolicy()
+        )
+
+        thread(name = "ProxyServer-Main", isDaemon = true) {
+            try {
+                serverSocket = ServerSocket()
+                serverSocket?.reuseAddress = true
+                serverSocket?.receiveBufferSize = 262144
+
+                val bindAddress = InetSocketAddress("0.0.0.0", PORT)
+                serverSocket?.bind(bindAddress, 200)
+
+                Log.d("ProxyServer", "✓ PROXY SERVER STARTED (TCP + UDP) on Port $PORT")
+
+                while (isRunning && serverSocket?.isClosed == false) {
+                    try {
+                        val client = serverSocket?.accept()
+                        if (client != null) {
+                            totalConnections.incrementAndGet()
+                            client.tcpNoDelay = true
+                            client.keepAlive = true
+                            client.soTimeout = 120000
+
+                            clientPool?.execute {
+                                handleClient(client)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (isRunning) Log.e("ProxyServer", "Accept error: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ProxyServer", "✗ Server Error", e)
+            }
+        }
+
+        // Start UDP cleanup thread
+        thread(name = "UDP-Cleanup", isDaemon = true) {
+            while (isRunning) {
+                try {
+                    Thread.sleep(30000) // Every 30 seconds
+                    val now = System.currentTimeMillis()
+                    udpRelays.entries.removeIf { (key, relay) ->
+                        if (now - relay.lastActivity > 60000) { // 60 second timeout
+                            relay.close()
+                            Log.d("ProxyServer", "Cleaned up stale UDP relay: $key")
+                            true
+                        } else false
+                    }
+                } catch (e: Exception) {
+                    Log.e("ProxyServer", "UDP cleanup error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun stop() {
+        Log.d("ProxyServer", "Stopping server...")
+        isRunning = false
+
+        // Close all UDP relays
+        udpRelays.values.forEach { it.close() }
+        udpRelays.clear()
+
+        clientPool?.shutdownNow()
+        clientPool = null
+
+        try {
+            serverSocket?.close()
+        } catch (e: Exception) {
+            Log.e("ProxyServer", "Error stopping: ${e.message}")
+        }
+    }
+
+    private fun handleClient(client: Socket) {
+        val clientId = "${client.inetAddress.hostAddress}:${client.port}"
+        activeConnections.incrementAndGet()
+
+        try {
+            val input = client.getInputStream()
+            val output = client.getOutputStream()
+
+            // SOCKS5 Handshake
+            val version = input.read()
+            if (version == -1) return
+            if (version != 5) {
+                Log.w("ProxyServer", "[$clientId] Invalid SOCKS version: $version")
+                return
+            }
+
+            val nMethods = input.read()
+            if (nMethods > 0) input.skip(nMethods.toLong())
+
+            // Send: No authentication required
+            output.write(byteArrayOf(0x05, 0x00))
+            output.flush()
+
+            // Read request
+            if (input.read() != 5) return
+            val cmd = input.read()
+            input.read() // skip reserved
+            val atyp = input.read()
+
+            // Parse target address
+            var targetHost = ""
+            when (atyp) {
+                1 -> { // IPv4
+                    val ipBytes = ByteArray(4)
+                    input.read(ipBytes)
+                    targetHost = InetAddress.getByAddress(ipBytes).hostAddress ?: ""
+                }
+                3 -> { // Domain name
+                    val len = input.read()
+                    val domainBytes = ByteArray(len)
+                    input.read(domainBytes)
+                    targetHost = String(domainBytes)
+                }
+                4 -> { // IPv6
+                    val ipBytes = ByteArray(16)
+                    input.read(ipBytes)
+                    targetHost = InetAddress.getByAddress(ipBytes).hostAddress ?: ""
+                }
+                else -> {
+                    Log.w("ProxyServer", "[$clientId] Unsupported address type: $atyp")
+                    return
+                }
+            }
+
+            val portBytes = ByteArray(2)
+            input.read(portBytes)
+            val targetPort = ((portBytes[0].toInt() and 0xFF) shl 8) or (portBytes[1].toInt() and 0xFF)
+
+            when (cmd) {
+                1 -> handleTcpConnect(client, input, output, targetHost, targetPort, clientId)
+                3 -> handleUdpAssociate(client, input, output, clientId)
+                else -> {
+                    Log.w("ProxyServer", "[$clientId] Unsupported command: $cmd")
+                    // Send command not supported
+                    output.write(byteArrayOf(0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                    output.flush()
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e("ProxyServer", "[$clientId] Error: ${e.message}", e)
+        } finally {
+            try { client.close() } catch (e: Exception) {}
+            activeConnections.decrementAndGet()
+            Log.d("ProxyServer", "[$clientId] Connection closed (Active: ${activeConnections.get()})")
+        }
+    }
+
+    private fun handleTcpConnect(
+        client: Socket,
+        input: InputStream,
+        output: OutputStream,
+        targetHost: String,
+        targetPort: Int,
+        clientId: String
+    ) {
+        val targetSocket = Socket()
+        targetSocket.soTimeout = 30000
+        targetSocket.tcpNoDelay = true
+        targetSocket.keepAlive = true
+
+        try {
+            targetSocket.connect(InetSocketAddress(targetHost, targetPort), 15000)
+            Log.d("ProxyServer", "[$clientId] ✓ TCP Connected to $targetHost:$targetPort")
+
+            // Send success response
+            val response = byteArrayOf(0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0)
+            output.write(response)
+            output.flush()
+
+            val latch = CountDownLatch(2)
+
+            // Client -> Target
+            thread(isDaemon = true, name = "Proxy-C2T-$clientId") {
+                try {
+                    pipeOptimized(input, targetSocket.getOutputStream(), clientId, "C->T")
+                } catch (e: Exception) {
+                    Log.d("ProxyServer", "[$clientId] C->T pipe closed: ${e.message}")
+                } finally {
+                    latch.countDown()
+                    try { targetSocket.shutdownOutput() } catch (e: Exception) {}
+                }
+            }
+
+            // Target -> Client
+            thread(isDaemon = true, name = "Proxy-T2C-$clientId") {
+                try {
+                    pipeOptimized(targetSocket.getInputStream(), output, clientId, "T->C")
+                } catch (e: Exception) {
+                    Log.d("ProxyServer", "[$clientId] T->C pipe closed: ${e.message}")
+                } finally {
+                    latch.countDown()
+                    try { client.shutdownOutput() } catch (e: Exception) {}
+                }
+            }
+
+            latch.await(180, TimeUnit.SECONDS)
+
+        } catch (e: Exception) {
+            Log.e("ProxyServer", "[$clientId] TCP Connection failed: ${e.message}")
+            try {
+                output.write(byteArrayOf(0x05, 0x05.toByte(), 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                output.flush()
+            } catch (ex: Exception) {}
+        } finally {
+            try { targetSocket.close() } catch (e: Exception) {}
+        }
+    }
+
+    private fun handleUdpAssociate(
+        client: Socket,
+        input: InputStream,
+        output: OutputStream,
+        clientId: String
+    ) {
+        try {
+            // Create UDP socket for relay
+            val udpSocket = DatagramSocket()
+            val udpPort = udpSocket.localPort
+
+            Log.d("ProxyServer", "[$clientId] ✓ UDP ASSOCIATE on port $udpPort")
+
+            // Send success response with UDP port
+            val response = ByteArray(10)
+            response[0] = 0x05 // Version
+            response[1] = 0x00 // Success
+            response[2] = 0x00 // Reserved
+            response[3] = 0x01 // IPv4
+
+            // Bind address (0.0.0.0)
+            response[4] = 0x00
+            response[5] = 0x00
+            response[6] = 0x00
+            response[7] = 0x00
+
+            // UDP Port
+            response[8] = (udpPort shr 8).toByte()
+            response[9] = (udpPort and 0xFF).toByte()
+
+            output.write(response)
+            output.flush()
+
+            // Create UDP relay
+            val relay = UdpAssociation(clientId, udpSocket, client.inetAddress.hostAddress ?: "unknown")
+            udpRelays[clientId] = relay
+            relay.start()
+
+            // Keep TCP connection alive until client closes it
+            try {
+                while (input.read() != -1) {
+                    // Just keep reading to detect when client closes
+                }
+            } catch (e: Exception) {
+                Log.d("ProxyServer", "[$clientId] UDP control connection closed")
+            }
+
+        } catch (e: Exception) {
+            Log.e("ProxyServer", "[$clientId] UDP ASSOCIATE failed: ${e.message}")
+            try {
+                output.write(byteArrayOf(0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                output.flush()
+            } catch (ex: Exception) {}
+        } finally {
+            udpRelays.remove(clientId)?.close()
+        }
+    }
+
+    private fun pipeOptimized(ins: InputStream, out: OutputStream, clientId: String = "", direction: String = "") {
+        val buffer = ByteArray(32768)
+        var totalBytes = 0
+        try {
+            var len: Int
+            while (ins.read(buffer).also { len = it } != -1) {
+                out.write(buffer, 0, len)
+                out.flush()
+                totalBytes += len
+            }
+            if (direction.isNotEmpty() && totalBytes > 0) {
+                Log.d("ProxyServer", "[$clientId] $direction transferred ${totalBytes / 1024}KB")
+            }
+        } catch (e: Exception) {
+            // Normal closure
+        }
+    }
+
+    inner class UdpAssociation(
+        private val clientId: String,
+        private val relaySocket: DatagramSocket, // This is the socket the client sends to
+        private val clientAddress: String
+    ) {
+        @Volatile var lastActivity = System.currentTimeMillis()
+        private var isRunning = true
+
+        // Maps TargetAddress -> Socket used to talk to that target
+        private val targetSockets = ConcurrentHashMap<String, DatagramSocket>()
+
+        init {
+            relaySocket.receiveBufferSize = 128 * 1024 // 128KB
+            relaySocket.sendBufferSize = 128 * 1024
+        }
+
+        fun start() {
+            thread(isDaemon = true, name = "UDP-Main-$clientId") {
+                val buffer = ByteArray(4096) // Large enough for any Roblox packet
+                while (isRunning) {
+                    try {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        relaySocket.receive(packet)
+                        lastActivity = System.currentTimeMillis()
+
+                        val data = packet.data
+                        // SOCKS5 UDP Header: RSV(2) FRAG(1) ATYP(1) DST.ADDR(var) DST.PORT(2)
+                        var offset = 3
+                        val atyp = data[offset].toInt() and 0xFF
+                        offset++
+
+                        val targetHost = when (atyp) {
+                            1 -> { // IPv4
+                                val host = "${data[offset].toInt() and 0xFF}.${data[offset+1].toInt() and 0xFF}." +
+                                        "${data[offset+2].toInt() and 0xFF}.${data[offset+3].toInt() and 0xFF}"
+                                offset += 4
+                                host
+                            }
+                            3 -> { // Domain
+                                val len = data[offset].toInt() and 0xFF
+                                offset++
+                                val host = String(data, offset, len)
+                                offset += len
+                                host
+                            }
+                            else -> continue
+                        }
+
+                        val targetPort = ((data[offset].toInt() and 0xFF) shl 8) or (data[offset+1].toInt() and 0xFF)
+                        offset += 2
+
+                        val payloadSize = packet.length - offset
+                        if (payloadSize <= 0) continue
+                        val payload = data.copyOfRange(offset, packet.length)
+
+                        // Get or create a dedicated socket for this specific target
+                        val targetKey = "$targetHost:$targetPort"
+                        val socketToTarget = targetSockets.getOrPut(targetKey) {
+                            val s = DatagramSocket()
+                            s.soTimeout = 10000
+                            // Start a listener for responses FROM this target
+                            startResponseListener(s, targetHost, targetPort, packet.address, packet.port)
+                            s
+                        }
+
+                        val sendPacket = DatagramPacket(payload, payload.size, InetAddress.getByName(targetHost), targetPort)
+                        socketToTarget.send(sendPacket)
+
+                    } catch (e: Exception) {
+                        if (isRunning) break
+                    }
+                }
+                close()
+            }
+        }
+
+        private fun startResponseListener(socket: DatagramSocket, host: String, port: Int, clientAddr: InetAddress, clientPort: Int) {
+            thread(isDaemon = true, name = "UDP-Resp-$port") {
+                val buffer = ByteArray(4096)
+                try {
+                    while (isRunning) {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        socket.receive(packet)
+
+                        // Build SOCKS5 UDP Header for the response
+                        val header = buildUdpHeader(host, port)
+                        val combined = header + packet.data.copyOf(packet.length)
+
+                        val response = DatagramPacket(combined, combined.size, clientAddr, clientPort)
+                        relaySocket.send(response)
+                        lastActivity = System.currentTimeMillis()
+                    }
+                } catch (e: Exception) {
+                    targetSockets.remove("$host:$port")
+                    try { socket.close() } catch (ex: Exception) {}
+                }
+            }
+        }
+
+        private fun buildUdpHeader(host: String, port: Int): ByteArray {
+            val addr = InetAddress.getByName(host).address
+            val header = ByteArray(4 + addr.size + 2)
+            header[0] = 0; header[1] = 0; header[2] = 0 // RSV + FRAG
+            header[3] = 1 // ATYP IPv4
+            System.arraycopy(addr, 0, header, 4, addr.size)
+            header[header.size - 2] = (port shr 8).toByte()
+            header[header.size - 1] = (port and 0xFF).toByte()
+            return header
+        }
+
+        fun close() {
+            isRunning = false
+            targetSockets.values.forEach { try { it.close() } catch (e: Exception) {} }
+            targetSockets.clear()
+            try { relaySocket.close() } catch (e: Exception) {}
+        }
+    }
+}
+
+============================================================
+FILE: app\src\main\java\com\example\hotspot_bypass_vpn\WiFiDirectBroadcastReceiver.kt
+============================================================
+
+package com.example.hotspot_bypass_vpn
+
+import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.NetworkInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
+
+class WiFiDirectBroadcastReceiver(
+    private val manager: WifiP2pManager,
+    private val channel: WifiP2pManager.Channel,
+    private val activity: MainActivity
+) : BroadcastReceiver() {
+
+    override fun onReceive(context: Context, intent: Intent) {
+        when (intent.action) {
+            WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
+                val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
+                // Optional: Notify activity if Wifi P2P is disabled
+                if (state != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
+                    // Wi-Fi Direct is OFF
+                }
+            }
+            WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
+                // We don't need this for the Host, but if you scan for peers,
+                // you would check permissions here too.
+            }
+            WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
+                val networkInfo = intent.getParcelableExtra<NetworkInfo>(WifiP2pManager.EXTRA_NETWORK_INFO)
+
+                if (networkInfo?.isConnected == true) {
+                    // --- PERMISSION CHECK START ---
+                    // We must check if we have permission before asking for IP/Password
+
+                    // 1. Check for Fine Location (Required for all versions)
+                    if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+                        return // Exit if permission is missing
+                    }
+
+                    // 2. Check for Nearby Devices (Required for Android 13+)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.NEARBY_WIFI_DEVICES)
+                            != PackageManager.PERMISSION_GRANTED) {
+                            return // Exit if permission is missing
+                        }
+                    }
+                    // --- PERMISSION CHECK END ---
+
+                    // If we passed the checks, it is safe to call these:
+                    manager.requestConnectionInfo(channel, activity)
+
+                    manager.requestGroupInfo(channel) { group ->
+                        // Send the group info (Password/SSID) back to MainActivity
+                        activity.updateGroupInfo(group)
+                    }
+                }
+            }
+            WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
+                // Respond to this device's wifi state changing
+            }
+        }
+    }
+}
