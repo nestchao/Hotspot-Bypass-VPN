@@ -23,7 +23,7 @@ echo This may take a minute...
 :: --uac-admin: Request Admin on launch
 :: --name: Output name
 :: --clean: Clean cache before build
-venv\Scripts\pyinstaller --noconsole --onefile --uac-admin --name "LaptopProxy" --clean main.py
+venv\Scripts\pyinstaller --noconsole --onefile --uac-admin --name "LaptopProxy" --clean --hidden-import=darkdetect --hidden-import=customtkinter --collect-data customtkinter main.py
 
 echo.
 echo ========================================
