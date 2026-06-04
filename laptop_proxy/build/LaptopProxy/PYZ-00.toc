@@ -1,4 +1,4 @@
-('C:\\Users\\user\\AndroidStudioProjects\\HotspotBypassVPN\\HotspotBypassVPN\\laptop_proxy\\build\\LaptopProxy\\PYZ-00.pyz',
+('C:\\Users\\user\\Desktop\\debug\\laptop_proxy_new\\build\\LaptopProxy\\PYZ-00.pyz',
  [('__future__',
    'C:\\Program Files\\Python312\\Lib\\__future__.py',
    'PYMODULE'),
