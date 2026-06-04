@@ -432,14 +432,17 @@ class App:
 
         ctk.CTkLabel(conn_frame, text="Phone IP:", anchor="w").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
         self.phone_ip = ctk.CTkEntry(conn_frame, placeholder_text="192.168.49.1")
+        self.phone_ip.insert(0, "192.168.49.1")
         self.phone_ip.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(10, 5))
 
         ctk.CTkLabel(conn_frame, text="Phone Port (SOCKS5):", anchor="w").grid(row=1, column=0, sticky="w", padx=10, pady=5)
         self.phone_port = ctk.CTkEntry(conn_frame, placeholder_text="8080")
+        self.phone_port.insert(0, "8080")
         self.phone_port.grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=5)
 
         ctk.CTkLabel(conn_frame, text="Local Bridge Port:", anchor="w").grid(row=2, column=0, sticky="w", padx=10, pady=(5, 10))
         self.local_port = ctk.CTkEntry(conn_frame, placeholder_text="7890")
+        self.local_port.insert(0, "7890")
         self.local_port.grid(row=2, column=1, sticky="ew", padx=(0, 10), pady=(5, 10))
 
         # ========== Section 2: Options ==========
@@ -532,8 +535,12 @@ class App:
 
     def start(self):
         ip = self.phone_ip.get().strip()
-        p_port = int(self.phone_port.get().strip())
-        l_port = int(self.local_port.get().strip())
+        try:
+            p_port = int(self.phone_port.get().strip())
+            l_port = int(self.local_port.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Port must be a number.")
+            return
 
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
