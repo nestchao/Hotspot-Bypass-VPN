@@ -1,8 +1,0 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Theme.HotspotBypassVPN" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Optional: Ensure status bar colors match your Compose theme -->
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-    </style>
-</resources>

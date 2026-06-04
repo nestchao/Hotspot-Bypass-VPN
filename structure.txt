@@ -1,20 +1,39 @@
-[DIR] HotspotBypassVPN/
-  - build.gradle.kts
-  - settings.gradle.kts
-  [DIR] app/
-    - build.gradle.kts
-    [DIR] src/
-      [DIR] main/
-        - AndroidManifest.xml
-        [DIR] java/
-              [DIR] hotspot_bypass_vpn/
-                - BootReceiver.kt
-                - DebugUtils.kt
-                - Dnscache.kt
-                - HostService.kt
-                - MainActivity.kt
-                - MyVpnService.kt
-                - Myvpnserviceoptimized.kt
-                - Myvpnservicetun2socks.kt
-                - ProxyServer.kt
-                - WiFiDirectBroadcastReceiver.kt
+HotspotBypassVPN/
+├── app/
+│   └── src/
+│       └── main/
+│           ├── AndroidManifest.xml
+│           ├── java/
+│           │   └── com/
+│           │       └── example/
+│           │           └── hotspot_bypass_vpn/
+│           │               ├── BootReceiver.kt
+│           │               ├── DebugUtils.kt
+│           │               ├── Dnscache.kt
+│           │               ├── HostService.kt
+│           │               ├── MainActivity.kt
+│           │               ├── MyVpnService.kt
+│           │               ├── Myvpnserviceoptimized.kt
+│           │               ├── Myvpnservicetun2socks.kt
+│           │               ├── ProxyServer.kt
+│           │               └── WiFiDirectBroadcastReceiver.kt
+│           └── res/
+│               ├── drawable/
+│               │   ├── ic_launcher_background.xml
+│               │   └── ic_launcher_foreground.xml
+│               ├── layout/
+│               │   └── activity_main.xml
+│               ├── mipmap-anydpi-v26/
+│               │   ├── ic_launcher.xml
+│               │   └── ic_launcher_round.xml
+│               ├── values/
+│               │   ├── colors.xml
+│               │   ├── strings.xml
+│               │   └── themes.xml
+│               ├── values-night/
+│               │   └── themes.xml
+│               └── xml/
+│                   ├── backup_rules.xml
+│                   └── data_extraction_rules.xml
+└── laptop_proxy/
+    └── main.py

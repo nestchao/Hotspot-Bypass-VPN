@@ -133,6 +133,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
             addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
         }
 
+        // Load saved band preference
+        selectedBand.intValue = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE).getInt("selected_band", 1)
+
         checkPermissions()
 
         setContent {
@@ -285,7 +288,10 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     Text("Wi-Fi Band:", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                     FilterChip(
                         selected = selectedBand.intValue == 1,
-                        onClick = { selectedBand.intValue = 1 },
+                        onClick = { 
+                            selectedBand.intValue = 1 
+                            getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE).edit().putInt("selected_band", 1).apply()
+                        },
                         label = { Text("2.4 GHz") },
                         enabled = !isHostRunning.value && !isClientRunning.value,
                         colors = FilterChipDefaults.filterChipColors(
@@ -297,7 +303,10 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     Spacer(modifier = Modifier.width(8.dp))
                     FilterChip(
                         selected = selectedBand.intValue == 2,
-                        onClick = { selectedBand.intValue = 2 },
+                        onClick = { 
+                            selectedBand.intValue = 2 
+                            getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE).edit().putInt("selected_band", 2).apply()
+                        },
                         label = { Text("5 GHz") },
                         enabled = !isHostRunning.value && !isClientRunning.value,
                         colors = FilterChipDefaults.filterChipColors(

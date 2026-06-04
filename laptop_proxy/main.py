@@ -279,35 +279,6 @@ class HttpSocksBridge:
                 try: s.close()
                 except: pass
 
-class WindowsProxy:
-    REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-
-    @staticmethod
-    def set(host, port):
-        if not IS_WINDOWS: return
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, WindowsProxy.REG_PATH, 0, winreg.KEY_WRITE)
-            winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"{host}:{port}")
-            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
-            winreg.CloseKey(key)
-            # Refresh settings
-            ctypes.windll.Wininet.InternetSetOptionW(0, 39, 0, 0)
-            ctypes.windll.Wininet.InternetSetOptionW(0, 37, 0, 0)
-        except Exception as e:
-            print(f"Failed to set proxy: {e}")
-
-    @staticmethod
-    def clear():
-        if not IS_WINDOWS: return
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, WindowsProxy.REG_PATH, 0, winreg.KEY_WRITE)
-            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 0)
-            winreg.CloseKey(key)
-            ctypes.windll.Wininet.InternetSetOptionW(0, 39, 0, 0)
-            ctypes.windll.Wininet.InternetSetOptionW(0, 37, 0, 0)
-        except Exception as e:
-            print(f"Failed to clear proxy: {e}")
-
 class IcsManager:
     """
     Automates Windows Mobile Hotspot and Internet Connection Sharing (ICS).
@@ -447,10 +418,8 @@ class App:
         self.root.title("Hotspot Proxy Client (Global)")
         self.root.geometry("450x500") 
         
-        self.bridge = None
         self.tun_mgr = None
         self.ics_mgr = IcsManager(self.log)
-        self.system_proxy_on = False
         self.share_enabled = tk.BooleanVar(value=False)
         
         # UI Elements
@@ -518,18 +487,10 @@ class App:
 
     def _do_start(self, ip, p_port, l_port, mode, share):
         try:
-            if mode == 1: # Simple Proxy
-                self.log(f"Starting Simple Proxy to {ip}:{p_port}")
-                self.bridge = HttpSocksBridge(l_port, ip, p_port, self.log)
-                self.bridge.start()
-                WindowsProxy.set("127.0.0.1", l_port)
-                self.system_proxy_on = True
-                self.log("✓ System Proxy Active.")
-            else: # Global VPN
-                self.log(f"Starting Global VPN to {ip}:{p_port}")
-                self.tun_mgr = TunManager(ip, p_port, l_port, self.log)
-                self.tun_mgr.start()
-                self.log("✓ Global VPN Active.")
+            self.log(f"Starting Global VPN to {ip}:{p_port}")
+            self.tun_mgr = TunManager(ip, p_port, l_port, self.log)
+            self.tun_mgr.start()
+            self.log("✓ Global VPN Active.")
 
             if share and mode == 2:
                 self.ics_mgr.enable_sharing(True)
@@ -546,16 +507,6 @@ class App:
     def _do_stop(self, is_closing=False):
         if self.share_enabled.get():
             self.ics_mgr.enable_sharing(False)
-
-        if self.bridge:
-            self.bridge.stop()
-            self.bridge = None
-            self.log("Bridge stopped.")
-
-        if self.system_proxy_on:
-            WindowsProxy.clear()
-            self.system_proxy_on = False
-            self.log("System Proxy cleared.")
 
         if self.tun_mgr:
             self.tun_mgr.stop()
