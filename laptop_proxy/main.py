@@ -1,5 +1,5 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import customtkinter as ctk
+from tkinter import messagebox
 import threading
 import socket
 import struct
@@ -415,59 +415,117 @@ class IcsManager:
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Hotspot Proxy Client (Global)")
-        self.root.geometry("450x500") 
-        
-        self.tun_mgr = None
-        self.ics_mgr = IcsManager(self.log)
-        self.share_enabled = tk.BooleanVar(value=False)
-        
-        # UI Elements
-        frame = ttk.Frame(root, padding="20")
-        frame.pack(fill="both", expand=True)
-        
-        ttk.Label(frame, text="Phone IP:").grid(row=0, column=0, sticky="w", pady=5)
-        self.phone_ip = ttk.Entry(frame)
-        self.phone_ip.insert(0, "192.168.49.1")
-        self.phone_ip.grid(row=0, column=1, sticky="ew", pady=5)
-        
-        ttk.Label(frame, text="Phone Port (SOCKS5):").grid(row=1, column=0, sticky="w", pady=5)
-        self.phone_port = ttk.Entry(frame)
-        self.phone_port.insert(0, "8080")
-        self.phone_port.grid(row=1, column=1, sticky="ew", pady=5)
-        
-        ttk.Label(frame, text="Local Bridge Port:").grid(row=2, column=0, sticky="w", pady=5)
-        self.local_port = ttk.Entry(frame)
-        self.local_port.insert(0, "7890")
-        self.local_port.grid(row=2, column=1, sticky="ew", pady=5)
+        self.root.title("Hotspot Bypass — Laptop Client")
+        self.root.geometry("550x620")
+        self.root.minsize(480, 500)
 
-        # Mode Selection (Global VPN is now default)
-        self.mode = tk.IntVar(value=2) # 2: Global VPN
-        ttk.Label(frame, text="Routing Mode:").grid(row=3, column=0, sticky="w", pady=5)
-        ttk.Label(frame, text="GLOBAL VPN", foreground="green", font=("Segoe UI", 9, "bold")).grid(row=3, column=1, sticky="w", pady=5)
-        
-        self.status_var = tk.StringVar(value="Status: Disconnected")
-        ttk.Label(frame, textvariable=self.status_var).grid(row=4, column=0, columnspan=2, pady=10)
-        
-        self.btn_start = ttk.Button(frame, text="START", command=self.start)
-        self.btn_start.grid(row=5, column=0, pady=10, padx=5, sticky="ew")
-        
-        self.btn_stop = ttk.Button(frame, text="STOP", command=self.stop, state="disabled")
-        self.btn_stop.grid(row=5, column=1, pady=10, padx=5, sticky="ew")
-        
-        self.log_text = tk.Text(frame, height=10, state="disabled", font=("Consolas", 9))
-        self.log_text.grid(row=6, column=0, columnspan=2, pady=5, sticky="nsew")
-        
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(6, weight=1)
+        self.tun_mgr = None
+
+        # Main container
+        self.main = ctk.CTkFrame(root, fg_color="transparent")
+        self.main.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # ========== Section 1: Connection Settings ==========
+        conn_frame = ctk.CTkFrame(self.main)
+        conn_frame.pack(fill="x", pady=(0, 10))
+        conn_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(conn_frame, text="Phone IP:", anchor="w").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        self.phone_ip = ctk.CTkEntry(conn_frame, placeholder_text="192.168.49.1")
+        self.phone_ip.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(10, 5))
+
+        ctk.CTkLabel(conn_frame, text="Phone Port (SOCKS5):", anchor="w").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.phone_port = ctk.CTkEntry(conn_frame, placeholder_text="8080")
+        self.phone_port.grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=5)
+
+        ctk.CTkLabel(conn_frame, text="Local Bridge Port:", anchor="w").grid(row=2, column=0, sticky="w", padx=10, pady=(5, 10))
+        self.local_port = ctk.CTkEntry(conn_frame, placeholder_text="7890")
+        self.local_port.grid(row=2, column=1, sticky="ew", padx=(0, 10), pady=(5, 10))
+
+        # ========== Section 2: Options ==========
+        opt_frame = ctk.CTkFrame(self.main)
+        opt_frame.pack(fill="x", pady=(0, 10))
+        opt_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(opt_frame, text="Routing Mode:", anchor="w").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        mode_badge = ctk.CTkLabel(
+            opt_frame, text="  GLOBAL VPN  ",
+            fg_color="#2B8C3F", text_color="white",
+            corner_radius=8
+        )
+        mode_badge.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(10, 5))
+
+        # ========== Section 3: Status & Controls ==========
+        status_frame = ctk.CTkFrame(self.main)
+        status_frame.pack(fill="x", pady=(0, 10))
+
+        self.status_var = ctk.StringVar(value="Status: Disconnected")
+        self.status_label = ctk.CTkLabel(status_frame, textvariable=self.status_var, text_color="gray", font=("Segoe UI", 12))
+        self.status_label.pack(pady=(10, 5))
+
+        self.progress = ctk.CTkProgressBar(status_frame, mode="indeterminate")
+        self.progress.pack(fill="x", padx=10, pady=(0, 10))
+        self.progress.set(0)
+
+        btn_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+        btn_frame.grid_columnconfigure((0, 1), weight=1)
+
+        self.btn_start = ctk.CTkButton(btn_frame, text="START", fg_color="#2B8C3F", hover_color="#236F32", command=self.start)
+        self.btn_start.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+
+        self.btn_stop = ctk.CTkButton(btn_frame, text="STOP", fg_color="#C43A31", hover_color="#9A2E26", command=self.stop, state="disabled")
+        self.btn_stop.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+
+        # ========== Section 4: Log ==========
+        log_frame = ctk.CTkFrame(self.main)
+        log_frame.pack(fill="both", expand=True)
+        log_frame.grid_rowconfigure(0, weight=1)
+        log_frame.grid_columnconfigure(0, weight=1)
+
+        self.log_text = ctk.CTkTextbox(log_frame, font=("Consolas", 11), height=200, wrap="word")
+        self.log_text.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 5))
+        self.log_text._textbox.tag_configure("error", foreground="#E74C3C")
+        self.log_text._textbox.tag_configure("success", foreground="#2ECC71")
+
+        btn_clear_log = ctk.CTkButton(
+            log_frame, text="Clear Log", width=80,
+            command=self._clear_log,
+            fg_color="transparent", border_width=1,
+            text_color=("gray10", "gray90")
+        )
+        btn_clear_log.grid(row=1, column=0, sticky="e", padx=10, pady=(0, 10))
+
+    def _set_status(self, text, state="disconnected"):
+        colors = {
+            "connected": "#2ECC71",
+            "starting": "#F39C12",
+            "stopping": "#F39C12",
+            "disconnected": "gray",
+            "error": "#E74C3C",
+        }
+        self.status_var.set(text)
+        self.status_label.configure(text_color=colors.get(state, "gray"))
+
+    def _clear_log(self):
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
     def log(self, msg):
         try:
             def _log():
+                tag = None
+                if msg.startswith("✗") or msg.startswith("Error"):
+                    tag = "error"
+                elif msg.startswith("✓"):
+                    tag = "success"
+
                 self.log_text.configure(state="normal")
-                self.log_text.insert("end", f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+                self.log_text.insert("end", f"[{time.strftime('%H:%M:%S')}] {msg}\n", tag)
                 self.log_text.see("end")
                 self.log_text.configure(state="disabled")
+
             self.root.after(0, _log)
         except:
             print(f"[{time.strftime('%H:%M:%S')}] {msg}")
@@ -476,59 +534,58 @@ class App:
         ip = self.phone_ip.get().strip()
         p_port = int(self.phone_port.get().strip())
         l_port = int(self.local_port.get().strip())
-        mode = self.mode.get()
-        share = self.share_enabled.get()
 
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        self.status_var.set("Status: Starting...")
-        
-        threading.Thread(target=self._do_start, args=(ip, p_port, l_port, mode, share), daemon=True).start()
+        self._set_status("Status: Starting...", "starting")
+        self.progress.start()
 
-    def _do_start(self, ip, p_port, l_port, mode, share):
+        threading.Thread(target=self._do_start, args=(ip, p_port, l_port), daemon=True).start()
+
+    def _do_start(self, ip, p_port, l_port):
         try:
             self.log(f"Starting Global VPN to {ip}:{p_port}")
             self.tun_mgr = TunManager(ip, p_port, l_port, self.log)
             self.tun_mgr.start()
             self.log("✓ Global VPN Active.")
 
-            if share and mode == 2:
-                self.ics_mgr.enable_sharing(True)
-
-            self.root.after(0, self.status_var.set, "Status: Connected")
+            self.root.after(0, lambda: self._set_status("Status: Connected", "connected"))
+            self.root.after(0, self.progress.stop)
         except Exception as e:
             self.log(f"✗ Error: {e}")
             self.root.after(0, self.stop)
 
     def stop(self):
-        self.status_var.set("Status: Stopping...")
+        self._set_status("Status: Stopping...", "stopping")
+        self.progress.start()
         threading.Thread(target=self._do_stop, daemon=True).start()
 
     def _do_stop(self, is_closing=False):
-        if self.share_enabled.get():
-            self.ics_mgr.enable_sharing(False)
-
         if self.tun_mgr:
             self.tun_mgr.stop()
             self.tun_mgr = None
             self.log("VPN stopped.")
 
         if not is_closing:
-            self.root.after(0, self.status_var.set, "Status: Disconnected")
-            self.root.after(0, self.btn_start.configure, {"state": "normal"})
-            self.root.after(0, self.btn_stop.configure, {"state": "disabled"})
+            self.root.after(0, self.progress.stop)
+            self.root.after(0, lambda: self._set_status("Status: Disconnected", "disconnected"))
+            self.root.after(0, lambda: self.btn_start.configure(state="normal"))
+            self.root.after(0, lambda: self.btn_stop.configure(state="disabled"))
             self.log("Stopped.")
 
 def main():
-    root = tk.Tk()
+    ctk.set_appearance_mode("system")
+    ctk.set_default_color_theme("dark-blue")
+
+    root = ctk.CTk()
     app = App(root)
-    
+
     def on_closing():
-        if app.tun_mgr or app.bridge or app.system_proxy_on:
+        if app.tun_mgr:
             print("Cleaning up before exit...")
             app._do_stop(is_closing=True)
         root.destroy()
-        
+
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
