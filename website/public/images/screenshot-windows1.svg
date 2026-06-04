@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 420" font-family="Segoe UI, Roboto, sans-serif">
+  <defs>
+    <linearGradient id="win-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2d2d3a"/>
+      <stop offset="100%" stop-color="#1e1e2e"/>
+    </linearGradient>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#03DAC5"/>
+      <stop offset="100%" stop-color="#009688"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Window frame -->
+  <rect x="10" y="10" width="500" height="400" rx="8" fill="#1e1e2e" stroke="#444" stroke-width="1"/>
+  <!-- Title bar -->
+  <rect x="10" y="10" width="500" height="32" rx="8" fill="#2d2d3a"/>
+  <rect x="10" y="26" width="500" height="16" fill="#2d2d3a"/>
+  <text x="30" y="30" fill="#03DAC5" font-size="12" font-weight="bold">📡 Hotspot Bypass VPN</text>
+  <circle cx="470" cy="26" r="6" fill="#E53935"/>
+  <circle cx="485" cy="26" r="6" fill="#FFC107"/>
+  <circle cx="500" cy="26" r="6" fill="#4CAF50"/>
+
+  <!-- Status bar -->
+  <rect x="20" y="50" width="480" height="36" rx="6" fill="#2d2d3a"/>
+  <circle cx="38" cy="68" r="5" fill="#4CAF50"/>
+  <text x="50" y="72" fill="#4CAF50" font-size="12" font-weight="bold">Connected</text>
+  <text x="140" y="72" fill="#888" font-size="11">Host: 192.168.49.1:8080</text>
+  <text x="330" y="72" fill="#888" font-size="11">📶 Signal: Excellent</text>
+
+  <!-- Proxy Settings Panel -->
+  <rect x="20" y="96" width="230" height="130" rx="8" fill="#252535"/>
+  <text x="30" y="115" fill="#03DAC5" font-size="11" font-weight="bold">Proxy Settings</text>
+
+  <text x="30" y="137" fill="#888" font-size="10">Proxy IP</text>
+  <rect x="30" y="142" width="200" height="24" rx="4" fill="#1a1a2e" stroke="#444" stroke-width="1"/>
+  <text x="38" y="158" fill="#ccc" font-size="11">192.168.49.1</text>
+
+  <text x="30" y="175" fill="#888" font-size="10">Port</text>
+  <rect x="30" y="180" width="200" height="24" rx="4" fill="#1a1a2e" stroke="#444" stroke-width="1"/>
+  <text x="38" y="196" fill="#ccc" font-size="11">8080</text>
+
+  <!-- Mode Selection -->
+  <rect x="270" y="96" width="230" height="130" rx="8" fill="#252535"/>
+  <text x="280" y="115" fill="#03DAC5" font-size="11" font-weight="bold">Connection Mode</text>
+
+  <rect x="280" y="126" width="210" height="32" rx="6" fill="#03DAC5"/>
+  <text x="385" y="147" fill="#120024" font-size="11" font-weight="bold" text-anchor="middle">🌐 Global VPN (TUN)</text>
+
+  <rect x="280" y="164" width="210" height="32" rx="6" fill="transparent" stroke="#555" stroke-width="1"/>
+  <text x="385" y="185" fill="#888" font-size="11" text-anchor="middle">🔒 Simple Proxy</text>
+
+  <!-- Stats row -->
+  <rect x="20" y="236" width="480" height="44" rx="8" fill="#252535"/>
+  <text x="35" y="260" fill="#888" font-size="10">TX</text>
+  <text x="35" y="274" fill="#fff" font-size="13" font-weight="bold">1.2 MB</text>
+  <text x="135" y="260" fill="#888" font-size="10">RX</text>
+  <text x="135" y="274" fill="#fff" font-size="13" font-weight="bold">4.8 MB</text>
+  <text x="235" y="260" fill="#888" font-size="10">Uptime</text>
+  <text x="235" y="274" fill="#fff" font-size="13" font-weight="bold">00:12:34</text>
+  <text x="335" y="260" fill="#888" font-size="10">Latency</text>
+  <text x="335" y="274" fill="#fff" font-size="13" font-weight="bold">32 ms</text>
+  <text x="435" y="260" fill="#888" font-size="10">Clients</text>
+  <text x="435" y="274" fill="#fff" font-size="13" font-weight="bold">1</text>
+
+  <!-- Live Log -->
+  <rect x="20" y="290" width="480" height="110" rx="8" fill="#252535"/>
+  <text x="30" y="310" fill="#03DAC5" font-size="11" font-weight="bold">📋 Live Log</text>
+  <rect x="20" y="316" width="480" height="84" rx="0" fill="#0d001a"/>
+  <text x="30" y="334" fill="#aaa" font-size="9" font-family="Consolas, monospace">[12:34:01] ✅ SOCKS5 proxy connected</text>
+  <text x="30" y="348" fill="#aaa" font-size="9" font-family="Consolas, monospace">[12:34:01] 🔄 TUN adapter created</text>
+  <text x="30" y="362" fill="#aaa" font-size="9" font-family="Consolas, monospace">[12:34:02] 🌐 Routing all traffic through proxy</text>
+  <text x="30" y="376" fill="#aaa" font-size="9" font-family="Consolas, monospace">[12:34:05] ✅ DNS resolution working</text>
+  <text x="30" y="390" fill="#aaa" font-size="9" font-family="Consolas, monospace">[12:34:10] 📡 UDP relay active for gaming</text>
+</svg>

@@ -1,0 +1,41 @@
+---
+layout: home
+
+hero:
+  name: Hotspot Bypass VPN
+  text: Share your mobile data freely
+  tagline: Bypass carrier hotspot restrictions using Wi-Fi Direct + SOCKS5 proxy. Share your phone's internet with laptops, game consoles, and other devices — without your carrier detecting tethering.
+  image:
+    src: /images/hero.svg
+    alt: Hotspot Bypass VPN
+  actions:
+    - theme: brand
+      text: Download
+      link: /download
+    - theme: alt
+      text: Android Guide
+      link: /guide/android
+    - theme: alt
+      text: Windows Guide
+      link: /guide/windows
+
+features:
+  - title: Wi-Fi Direct Tethering
+    details: Creates a direct peer-to-peer connection instead of a carrier-detectable mobile hotspot. Carriers see regular phone data, not tethering traffic.
+    icon: 📡
+  - title: Dual Mode
+    details: Switch between Host mode (share your connection) and Client mode (connect to another host). One app, two roles.
+    icon: 🔄
+  - title: Windows Desktop Client
+    details: Full-featured Windows app with TUN virtual adapter, routing 100% of traffic through the phone's proxy. Great for gaming.
+    icon: 💻
+  - title: Console & TV Support
+    details: Bridge your PC's connection to PS5, Xbox, Nintendo Switch, Mac, and Smart TVs via Windows Internet Connection Sharing.
+    icon: 🎮
+  - title: No Root Required
+    details: Works entirely within Android's standard VPNService and Wi-Fi Direct APIs. No root access needed.
+    icon: 🔒
+  - title: Persistent Connection
+    details: Foreground service with wake locks, Wi-Fi locks, and auto-restart keeps the connection alive even with the screen off.
+    icon: ⚡
+---
