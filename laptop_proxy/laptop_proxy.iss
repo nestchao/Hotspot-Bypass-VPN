@@ -4,7 +4,7 @@
 #define MyAppName "Laptop Proxy"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "HotspotBypassVPN"
-#define MyAppExeName "LaptopProxy.exe"
+#define MyAppExeName "Hotspot_Bypass_VPN_Windows.exe"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application. Do not use the same AppId value in installers for other applications.
@@ -19,7 +19,7 @@ DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only.)
 ;PrivilegesRequired=lowest
 PrivilegesRequired=admin
-OutputBaseFilename=LaptopProxySetup
+OutputBaseFilename=HotspotBypassVPNSetup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -31,7 +31,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\Hotspot_Bypass_VPN_Windows\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

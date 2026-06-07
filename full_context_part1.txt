@@ -3592,472 +3592,91 @@ class WiFiDirectBroadcastReceiver(
 }
 
 ============================================================
-FILE: app\src\main\res\drawable\ic_launcher_background.xml
+FILE: laptop_proxy\build_exe.bat
 ============================================================
 
-<?xml version="1.0" encoding="utf-8"?>
-<vector
-    android:height="108dp"
-    android:width="108dp"
-    android:viewportHeight="108"
-    android:viewportWidth="108"
-    xmlns:android="http://schemas.android.com/apk/res/android">
-    <path android:fillColor="#3DDC84"
-          android:pathData="M0,0h108v108h-108z"/>
-    <path android:fillColor="#00000000" android:pathData="M9,0L9,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,0L19,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M29,0L29,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M39,0L39,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M49,0L49,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M59,0L59,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M69,0L69,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M79,0L79,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M89,0L89,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M99,0L99,108"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,9L108,9"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,19L108,19"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,29L108,29"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,39L108,39"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,49L108,49"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,59L108,59"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,69L108,69"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,79L108,79"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,89L108,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M0,99L108,99"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,29L89,29"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,39L89,39"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,49L89,49"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,59L89,59"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,69L89,69"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M19,79L89,79"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M29,19L29,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M39,19L39,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M49,19L49,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M59,19L59,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M69,19L69,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-    <path android:fillColor="#00000000" android:pathData="M79,19L79,89"
-          android:strokeColor="#33FFFFFF" android:strokeWidth="0.8"/>
-</vector>
+@echo off
+echo ========================================
+echo   Laptop Proxy - EXE Builder
+echo ========================================
+
+echo.
+echo [1/3] Preparing virtual environment...
+if not exist venv (
+    python -m venv venv
+)
+call venv\Scripts\activate
+
+echo.
+echo [2/3] Installing dependencies...
+pip install -r requirements.txt
+
+echo.
+echo [3/3] Building EXE (onedir mode, no UPX)...
+echo This may take a minute...
+
+:: Build from spec file (all settings are in LaptopProxy.spec)
+:: --clean: Clean cache before build
+:: --noconfirm: Overwrite output without asking
+venv\Scripts\pyinstaller --clean --noconfirm LaptopProxy.spec
+
+echo.
+echo ========================================
+echo   BUILD COMPLETE!
+echo   Your software is in:
+echo   dist\Hotspot_Bypass_VPN_Windows\
+echo ========================================
+pause
 
 
 ============================================================
-FILE: app\src\main\res\drawable\ic_launcher_foreground.xml
+FILE: laptop_proxy\build_installer.bat
 ============================================================
 
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="85.84757"
-                android:endY="92.4963"
-                android:startX="42.9492"
-                android:startY="49.59793"
-                android:type="linear">
-                <item
-                    android:color="#44000000"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillType="nonZero"
-        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
-        android:strokeWidth="1"
-        android:strokeColor="#00000000" />
-</vector>
+@echo off
+echo ========================================
+echo   Laptop Proxy - Installer Builder
+echo ========================================
 
-============================================================
-FILE: app\src\main\res\layout\activity_main.xml
-============================================================
+echo.
+echo [1/3] Checking for Inno Setup compiler...
+where iscc >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Inno Setup compiler iscc.exe not found in PATH.
+    echo Please install Inno Setup from https://jrsoftware.org/isdl.php
+    pause
+    exit /b 1
+)
+echo       Found.
 
-<?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/main"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:padding="16dp"
-    android:background="#F5F5F5"
-    tools:context=".MainActivity">
+echo.
+echo [2/3] Checking for portable build output...
+if not exist "dist\Hotspot_Bypass_VPN_Windows\Hotspot_Bypass_VPN_Windows.exe" (
+    echo [ERROR] dist\Hotspot_Bypass_VPN_Windows\Hotspot_Bypass_VPN_Windows.exe not found.
+    echo Please run build_exe.bat first to produce the portable build.
+    pause
+    exit /b 1
+)
+echo       Found.
 
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent">
+echo.
+echo [3/3] Compiling Installer...
+iscc laptop_proxy.iss
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal">
+echo.
+echo ========================================
+echo   BUILD COMPLETE!
+echo   Your installer is in the "Output" folder.
+echo ========================================
+pause
 
-            <!-- APP TITLE -->
-
-            <!-- SECTION 1: HOST (SHARE INTERNET) -->
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:layout_marginBottom="24dp"
-                android:text="Hotspot Bypass VPN"
-                android:textColor="#333"
-                android:textSize="26sp"
-                android:textStyle="bold" />
-
-            <androidx.cardview.widget.CardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="4dp"
-                android:layout_marginBottom="20dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="MODE A: HOST (Share Internet)"
-                        android:textStyle="bold"
-                        android:textColor="#2196F3"
-                        android:textSize="16sp"
-                        android:layout_marginBottom="8dp"/>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp"
-                        android:text="1. Turn on Mobile Data.\n2. Click Start to create a Wi-Fi Group.\n3. Turn on Wi-Fi and Location if asked."
-                        android:textColor="#666"
-                        android:textSize="13sp" />
-
-                    <Button
-                        android:id="@+id/btn_start_host"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Start Sharing"
-                        android:backgroundTint="#2196F3"
-                        android:textColor="@android:color/white"
-                        android:textStyle="bold"/>
-
-                    <Button
-                        android:id="@+id/btn_stop_host"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Stop Sharing"
-                        android:backgroundTint="#F44336"
-                        android:textColor="@android:color/white"
-                        android:layout_marginTop="4dp"/>
-
-                    <TextView
-                        android:id="@+id/tv_host_info"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Status: Stopped"
-                        android:background="#EEEEEE"
-                        android:padding="12dp"
-                        android:layout_marginTop="12dp"
-                        android:textColor="#444"
-                        android:fontFamily="monospace"
-                        android:textSize="13sp"/>
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
-            <!-- SECTION 2: CLIENT (CONNECT) -->
-            <androidx.cardview.widget.CardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="4dp"
-                android:layout_marginBottom="20dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Wi-Fi Band:"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:layout_marginTop="8dp"/>
-
-                    <RadioGroup
-                        android:id="@+id/rg_band"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="8dp">
-                        <RadioButton
-                            android:id="@+id/rb_24ghz"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="2.4 GHz"
-                            android:checked="true" />
-                        <RadioButton
-                            android:id="@+id/rb_5ghz"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp"
-                            android:text="5 GHz" />
-                    </RadioGroup>
-
-                    <TextView
-                        android:id="@+id/textView"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="btn_start_host " />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="MODE B: CLIENT (Connect)"
-                        android:textStyle="bold"
-                        android:textColor="#4CAF50"
-                        android:textSize="16sp"
-                        android:layout_marginBottom="8dp"/>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="1. Connect to the Host's Wi-Fi manually.\n2. Enter IP and Port from the Host phone.\n3. Turn on Location if asked."
-                        android:textSize="13sp"
-                        android:textColor="#666"
-                        android:layout_marginBottom="12dp"/>
-
-                    <EditText
-                        android:id="@+id/et_host_ip"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="Host IP (e.g. 192.168.49.1)"
-                        android:text="192.168.49.1"
-                        android:inputType="text"
-                        android:digits="0123456789."
-                        android:textSize="14sp" />
-
-                    <EditText
-                        android:id="@+id/et_host_port"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="Port (Default 8080)"
-                        android:inputType="number"
-                        android:text="8080"
-                        android:textSize="14sp" />
-
-                    <Button
-                        android:id="@+id/btn_connect"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Connect &amp; Start VPN"
-                        android:backgroundTint="#4CAF50"
-                        android:textColor="@android:color/white"
-                        android:textStyle="bold"
-                        android:layout_marginTop="8dp"/>
-
-                    <Button
-                        android:id="@+id/btn_stop_client"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Stop VPN"
-                        android:backgroundTint="#F44336"
-                        android:textColor="@android:color/white"
-                        android:layout_marginTop="4dp"/>
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
-            <!-- DEBUG AREA -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="8dp">
-
-                <Button
-                    android:id="@+id/btn_debug"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Run Connection Test"
-                    android:backgroundTint="#607D8B"
-                    android:layout_marginBottom="8dp"/>
-
-                <TextView
-                    android:id="@+id/tv_status_log"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Logs will appear here..."
-                    android:padding="12dp"
-                    android:background="#E0E0E0"
-                    android:textColor="#555555"
-                    android:textSize="12sp"
-                    android:fontFamily="monospace"
-                    android:minLines="5"/>
-            </LinearLayout>
-
-        </LinearLayout>
-    </ScrollView>
-</androidx.constraintlayout.widget.ConstraintLayout>
-
-============================================================
-FILE: app\src\main\res\mipmap-anydpi-v26\ic_launcher.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>
-
-============================================================
-FILE: app\src\main\res\mipmap-anydpi-v26\ic_launcher_round.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>
-
-============================================================
-FILE: app\src\main\res\values\colors.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-</resources>
-
-============================================================
-FILE: app\src\main\res\values\strings.xml
-============================================================
-
-<resources>
-    <string name="app_name">Hotspot-Bypass-VPN</string>
-</resources>
-
-============================================================
-FILE: app\src\main\res\values\themes.xml
-============================================================
-
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Theme.HotspotBypassVPN" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Optional: Ensure status bar colors match your Compose theme -->
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-    </style>
-</resources>
-
-============================================================
-FILE: app\src\main\res\values-night\themes.xml
-============================================================
-
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.HotspotBypassVPN" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
-    </style>
-</resources>
-
-============================================================
-FILE: app\src\main\res\xml\backup_rules.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
--->
-<full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
-</full-backup-content>
-
-============================================================
-FILE: app\src\main\res\xml\data_extraction_rules.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
-<data-extraction-rules>
-    <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
-    </cloud-backup>
-    <!--
-    <device-transfer>
-        <include .../>
-        <exclude .../>
-    </device-transfer>
-    -->
-</data-extraction-rules>
 
 ============================================================
 FILE: laptop_proxy\main.py
 ============================================================
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+import customtkinter as ctk
+from tkinter import messagebox
 import threading
 import socket
 import struct
@@ -4473,120 +4092,184 @@ class IcsManager:
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Hotspot Proxy Client (Global)")
-        self.root.geometry("450x500") 
-        
-        self.tun_mgr = None
-        self.ics_mgr = IcsManager(self.log)
-        self.share_enabled = tk.BooleanVar(value=False)
-        
-        # UI Elements
-        frame = ttk.Frame(root, padding="20")
-        frame.pack(fill="both", expand=True)
-        
-        ttk.Label(frame, text="Phone IP:").grid(row=0, column=0, sticky="w", pady=5)
-        self.phone_ip = ttk.Entry(frame)
-        self.phone_ip.insert(0, "192.168.49.1")
-        self.phone_ip.grid(row=0, column=1, sticky="ew", pady=5)
-        
-        ttk.Label(frame, text="Phone Port (SOCKS5):").grid(row=1, column=0, sticky="w", pady=5)
-        self.phone_port = ttk.Entry(frame)
-        self.phone_port.insert(0, "8080")
-        self.phone_port.grid(row=1, column=1, sticky="ew", pady=5)
-        
-        ttk.Label(frame, text="Local Bridge Port:").grid(row=2, column=0, sticky="w", pady=5)
-        self.local_port = ttk.Entry(frame)
-        self.local_port.insert(0, "7890")
-        self.local_port.grid(row=2, column=1, sticky="ew", pady=5)
+        self.root.title("Hotspot Bypass — Laptop Client")
+        self.root.geometry("550x620")
+        self.root.minsize(480, 500)
 
-        # Mode Selection (Global VPN is now default)
-        self.mode = tk.IntVar(value=2) # 2: Global VPN
-        ttk.Label(frame, text="Routing Mode:").grid(row=3, column=0, sticky="w", pady=5)
-        ttk.Label(frame, text="GLOBAL VPN", foreground="green", font=("Segoe UI", 9, "bold")).grid(row=3, column=1, sticky="w", pady=5)
-        
-        self.status_var = tk.StringVar(value="Status: Disconnected")
-        ttk.Label(frame, textvariable=self.status_var).grid(row=4, column=0, columnspan=2, pady=10)
-        
-        self.btn_start = ttk.Button(frame, text="START", command=self.start)
-        self.btn_start.grid(row=5, column=0, pady=10, padx=5, sticky="ew")
-        
-        self.btn_stop = ttk.Button(frame, text="STOP", command=self.stop, state="disabled")
-        self.btn_stop.grid(row=5, column=1, pady=10, padx=5, sticky="ew")
-        
-        self.log_text = tk.Text(frame, height=10, state="disabled", font=("Consolas", 9))
-        self.log_text.grid(row=6, column=0, columnspan=2, pady=5, sticky="nsew")
-        
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(6, weight=1)
+        self.tun_mgr = None
+
+        # Main container
+        self.main = ctk.CTkFrame(root, fg_color="transparent")
+        self.main.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # ========== Section 1: Connection Settings ==========
+        conn_frame = ctk.CTkFrame(self.main)
+        conn_frame.pack(fill="x", pady=(0, 10))
+        conn_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(conn_frame, text="Phone IP:", anchor="w").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        self.phone_ip = ctk.CTkEntry(conn_frame, placeholder_text="192.168.49.1")
+        self.phone_ip.insert(0, "192.168.49.1")
+        self.phone_ip.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(10, 5))
+
+        ctk.CTkLabel(conn_frame, text="Phone Port (SOCKS5):", anchor="w").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.phone_port = ctk.CTkEntry(conn_frame, placeholder_text="8080")
+        self.phone_port.insert(0, "8080")
+        self.phone_port.grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=5)
+
+        ctk.CTkLabel(conn_frame, text="Local Bridge Port:", anchor="w").grid(row=2, column=0, sticky="w", padx=10, pady=(5, 10))
+        self.local_port = ctk.CTkEntry(conn_frame, placeholder_text="7890")
+        self.local_port.insert(0, "7890")
+        self.local_port.grid(row=2, column=1, sticky="ew", padx=(0, 10), pady=(5, 10))
+
+        # ========== Section 2: Options ==========
+        opt_frame = ctk.CTkFrame(self.main)
+        opt_frame.pack(fill="x", pady=(0, 10))
+        opt_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(opt_frame, text="Routing Mode:", anchor="w").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        mode_badge = ctk.CTkLabel(
+            opt_frame, text="  GLOBAL VPN  ",
+            fg_color="#2B8C3F", text_color="white",
+            corner_radius=8
+        )
+        mode_badge.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(10, 5))
+
+        # ========== Section 3: Status & Controls ==========
+        status_frame = ctk.CTkFrame(self.main)
+        status_frame.pack(fill="x", pady=(0, 10))
+
+        self.status_var = ctk.StringVar(value="Status: Disconnected")
+        self.status_label = ctk.CTkLabel(status_frame, textvariable=self.status_var, text_color="gray", font=("Segoe UI", 12))
+        self.status_label.pack(pady=(10, 5))
+
+        self.progress = ctk.CTkProgressBar(status_frame, mode="indeterminate")
+        self.progress.pack(fill="x", padx=10, pady=(0, 10))
+        self.progress.set(0)
+
+        btn_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+        btn_frame.grid_columnconfigure((0, 1), weight=1)
+
+        self.btn_start = ctk.CTkButton(btn_frame, text="START", fg_color="#2B8C3F", hover_color="#236F32", command=self.start)
+        self.btn_start.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+
+        self.btn_stop = ctk.CTkButton(btn_frame, text="STOP", fg_color="#C43A31", hover_color="#9A2E26", command=self.stop, state="disabled")
+        self.btn_stop.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+
+        # ========== Section 4: Log ==========
+        log_frame = ctk.CTkFrame(self.main)
+        log_frame.pack(fill="both", expand=True)
+        log_frame.grid_rowconfigure(0, weight=1)
+        log_frame.grid_columnconfigure(0, weight=1)
+
+        self.log_text = ctk.CTkTextbox(log_frame, font=("Consolas", 11), height=200, wrap="word")
+        self.log_text.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 5))
+        self.log_text._textbox.tag_configure("error", foreground="#E74C3C")
+        self.log_text._textbox.tag_configure("success", foreground="#2ECC71")
+
+        btn_clear_log = ctk.CTkButton(
+            log_frame, text="Clear Log", width=80,
+            command=self._clear_log,
+            fg_color="transparent", border_width=1,
+            text_color=("gray10", "gray90")
+        )
+        btn_clear_log.grid(row=1, column=0, sticky="e", padx=10, pady=(0, 10))
+
+    def _set_status(self, text, state="disconnected"):
+        colors = {
+            "connected": "#2ECC71",
+            "starting": "#F39C12",
+            "stopping": "#F39C12",
+            "disconnected": "gray",
+            "error": "#E74C3C",
+        }
+        self.status_var.set(text)
+        self.status_label.configure(text_color=colors.get(state, "gray"))
+
+    def _clear_log(self):
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
     def log(self, msg):
         try:
             def _log():
+                tag = None
+                if msg.startswith("✗") or msg.startswith("Error"):
+                    tag = "error"
+                elif msg.startswith("✓"):
+                    tag = "success"
+
                 self.log_text.configure(state="normal")
-                self.log_text.insert("end", f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+                self.log_text.insert("end", f"[{time.strftime('%H:%M:%S')}] {msg}\n", tag)
                 self.log_text.see("end")
                 self.log_text.configure(state="disabled")
+
             self.root.after(0, _log)
         except:
             print(f"[{time.strftime('%H:%M:%S')}] {msg}")
 
     def start(self):
         ip = self.phone_ip.get().strip()
-        p_port = int(self.phone_port.get().strip())
-        l_port = int(self.local_port.get().strip())
-        mode = self.mode.get()
-        share = self.share_enabled.get()
+        try:
+            p_port = int(self.phone_port.get().strip())
+            l_port = int(self.local_port.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Port must be a number.")
+            return
 
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        self.status_var.set("Status: Starting...")
-        
-        threading.Thread(target=self._do_start, args=(ip, p_port, l_port, mode, share), daemon=True).start()
+        self._set_status("Status: Starting...", "starting")
+        self.progress.start()
 
-    def _do_start(self, ip, p_port, l_port, mode, share):
+        threading.Thread(target=self._do_start, args=(ip, p_port, l_port), daemon=True).start()
+
+    def _do_start(self, ip, p_port, l_port):
         try:
             self.log(f"Starting Global VPN to {ip}:{p_port}")
             self.tun_mgr = TunManager(ip, p_port, l_port, self.log)
             self.tun_mgr.start()
             self.log("✓ Global VPN Active.")
 
-            if share and mode == 2:
-                self.ics_mgr.enable_sharing(True)
-
-            self.root.after(0, self.status_var.set, "Status: Connected")
+            self.root.after(0, lambda: self._set_status("Status: Connected", "connected"))
+            self.root.after(0, self.progress.stop)
         except Exception as e:
             self.log(f"✗ Error: {e}")
             self.root.after(0, self.stop)
 
     def stop(self):
-        self.status_var.set("Status: Stopping...")
+        self._set_status("Status: Stopping...", "stopping")
+        self.progress.start()
         threading.Thread(target=self._do_stop, daemon=True).start()
 
     def _do_stop(self, is_closing=False):
-        if self.share_enabled.get():
-            self.ics_mgr.enable_sharing(False)
-
         if self.tun_mgr:
             self.tun_mgr.stop()
             self.tun_mgr = None
             self.log("VPN stopped.")
 
         if not is_closing:
-            self.root.after(0, self.status_var.set, "Status: Disconnected")
-            self.root.after(0, self.btn_start.configure, {"state": "normal"})
-            self.root.after(0, self.btn_stop.configure, {"state": "disabled"})
+            self.root.after(0, self.progress.stop)
+            self.root.after(0, lambda: self._set_status("Status: Disconnected", "disconnected"))
+            self.root.after(0, lambda: self.btn_start.configure(state="normal"))
+            self.root.after(0, lambda: self.btn_stop.configure(state="disabled"))
             self.log("Stopped.")
 
 def main():
-    root = tk.Tk()
+    ctk.set_appearance_mode("system")
+    ctk.set_default_color_theme("dark-blue")
+
+    root = ctk.CTk()
     app = App(root)
-    
+
     def on_closing():
-        if app.tun_mgr or app.bridge or app.system_proxy_on:
+        if app.tun_mgr:
             print("Cleaning up before exit...")
             app._do_stop(is_closing=True)
         root.destroy()
-        
+
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
@@ -4600,3 +4283,38 @@ if __name__ == "__main__":
         except Exception: pass
 
     main()
+
+============================================================
+FILE: laptop_proxy\_replace_ui.py
+============================================================
+
+
+import pathlib
+
+PATH = pathlib.Path(r"C:\Users\user\AndroidStudioProjects\HotspotBypassVPN\HotspotBypassVPN\laptop_proxy\main.py")
+content = PATH.read_text("utf-8")
+lines = content.split("\n")
+
+# Find boundaries
+app_start = None
+main_end = None
+for i, line in enumerate(lines):
+    if line.startswith("class App:") and app_start is None:
+        app_start = i
+    if app_start is not None and "root.mainloop()" in line:
+        main_end = i
+        break
+
+print(f"Replacing lines {app_start+1} through {main_end+1}")
+
+# Read new code from separate file
+new_code_path = pathlib.Path(r"C:\Users\user\AndroidStudioProjects\HotspotBypassVPN\HotspotBypassVPN\laptop_proxy\_new_ui_code.py")
+new_code = new_code_path.read_text("utf-8")
+
+before = "\n".join(lines[:app_start])
+after = "\n".join(lines[main_end+1:])
+
+new_content = before + "\n" + new_code + "\n" + after
+PATH.write_text(new_content, "utf-8")
+print("Done!")
+

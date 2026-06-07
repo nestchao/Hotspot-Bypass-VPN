@@ -11,23 +11,22 @@ if not exist venv (
 call venv\Scripts\activate
 
 echo.
-echo [2/3] Installing PyInstaller and dependencies...
+echo [2/3] Installing dependencies...
 pip install -r requirements.txt
 
 echo.
-echo [3/3] Building Standalone EXE...
+echo [3/3] Building EXE (onedir mode, no UPX)...
 echo This may take a minute...
 
-:: --onefile: Single EXE
-:: --noconsole: No terminal window
-:: --uac-admin: Request Admin on launch
-:: --name: Output name
+:: Build from spec file (all settings are in LaptopProxy.spec)
 :: --clean: Clean cache before build
-venv\Scripts\pyinstaller --noconsole --onefile --uac-admin --name "LaptopProxy" --clean --hidden-import=darkdetect --hidden-import=customtkinter --collect-data customtkinter main.py
+:: --noconfirm: Overwrite output without asking
+venv\Scripts\pyinstaller --clean --noconfirm LaptopProxy.spec
 
 echo.
 echo ========================================
 echo   BUILD COMPLETE!
-echo   Your software is in the "dist" folder.
+echo   Your software is in:
+echo   dist\Hotspot_Bypass_VPN_Windows\
 echo ========================================
 pause
