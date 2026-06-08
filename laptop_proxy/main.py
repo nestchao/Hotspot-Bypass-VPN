@@ -35,6 +35,13 @@ class TunManager:
         self.local_port = local_port
         self.log = log_fn
         self.process = None
+        self._monitoring_active = False
+        self._connection_healthy = True
+        self._restarting = False
+
+    def _clean_routes(self):
+        subprocess.run(["route", "delete", "0.0.0.0", "mask", "128.0.0.0"], capture_output=True)
+        subprocess.run(["route", "delete", "128.0.0.0", "mask", "128.0.0.0"], capture_output=True)
 
     def _check_dependencies(self):
         os.makedirs(BIN_DIR, exist_ok=True)
@@ -99,8 +106,7 @@ class TunManager:
         t2s_exe = self._check_dependencies()
         
         self.log("Cleaning up old routes...")
-        subprocess.run(["route", "delete", "0.0.0.0", "mask", "128.0.0.0"], capture_output=True)
-        subprocess.run(["route", "delete", "128.0.0.0", "mask", "128.0.0.0"], capture_output=True)
+        self._clean_routes()
 
         self.log("Starting VPN Interface...")
         cmd =[
@@ -140,10 +146,16 @@ class TunManager:
         subprocess.run(["route", "add", "128.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True)
         self.log("Global VPN Active.")
 
+        # Start health monitors
+        self._monitoring_active = True
+        self._connection_healthy = True
+        threading.Thread(target=self._monitor_process, daemon=True).start()
+        threading.Thread(target=self._monitor_health, daemon=True).start()
+
     def stop(self):
+        self._monitoring_active = False
         self.log("Restoring routes...")
-        subprocess.run(["route", "delete", "0.0.0.0", "mask", "128.0.0.0"], capture_output=True)
-        subprocess.run(["route", "delete", "128.0.0.0", "mask", "128.0.0.0"], capture_output=True)
+        self._clean_routes()
 
         if self.process:
             self.log("Stopping VPN process...")
@@ -156,6 +168,96 @@ class TunManager:
             
         subprocess.run(["netsh", "interface", "set", "interface", "LaptopProxyVPN", "disable"], capture_output=True)
         self.log("VPN Stopped.")
+
+    def _monitor_process(self):
+        while self._monitoring_active:
+            time.sleep(5)
+            if not self._monitoring_active:
+                break
+            if self.process:
+                exit_code = self.process.poll()
+                if exit_code is not None:
+                    self.log(f"tun2socks crashed (exit code {exit_code}), auto-restarting...")
+                    self._restart_tun2socks()
+                    return
+
+    def _monitor_health(self):
+        fail_count = 0
+        while self._monitoring_active:
+            time.sleep(15)
+            if not self._monitoring_active:
+                break
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((self.phone_ip, self.phone_port))
+                s.close()
+                if fail_count > 0:
+                    self.log("Proxy connection restored")
+                fail_count = 0
+                self._connection_healthy = True
+            except Exception:
+                fail_count += 1
+                if fail_count == 1:
+                    self.log("Proxy health check failed (1/2)")
+                elif fail_count >= 2:
+                    self.log("Proxy unreachable, restarting tunnel...")
+                    self._connection_healthy = False
+                    self._restart_tun2socks()
+                    return
+
+    def _restart_tun2socks(self):
+        if self._restarting or not self._monitoring_active:
+            return
+        self._restarting = True
+        try:
+            if self.process:
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try: self.process.kill()
+                    except: pass
+                except Exception:
+                    try: self.process.kill()
+                    except: pass
+                self.process = None
+
+            time.sleep(2)
+
+            self._clean_routes()
+
+            t2s_exe = os.path.join(BIN_DIR, "tun2socks.exe")
+            cmd = [
+                t2s_exe,
+                "-device", "tun://LaptopProxyVPN",
+                "-proxy", f"socks5://{self.phone_ip}:{self.phone_port}",
+                "-loglevel", "warning"
+            ]
+            cflags = 0x08000000 if IS_WINDOWS else 0
+            try:
+                self.process = subprocess.Popen(cmd, cwd=BIN_DIR, creationflags=cflags)
+            except Exception as e:
+                self.log(f"Failed to restart tun2socks: {e}")
+                return
+
+            self.log("Waiting for adapter to recover...")
+            time.sleep(3)
+
+            subprocess.run(["netsh", "interface", "ip", "set", "address", "name=LaptopProxyVPN", "static", "10.0.0.2", "255.255.255.0", "10.0.0.1"], capture_output=True)
+            subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=LaptopProxyVPN", "static", "8.8.8.8"], capture_output=True)
+
+            time.sleep(1)
+
+            self.log("Re-applying global routes...")
+            subprocess.run(["route", "add", "0.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True)
+            subprocess.run(["route", "add", "128.0.0.0", "mask", "128.0.0.0", "10.0.0.1", "metric", "1"], capture_output=True)
+            self.log("Tunnel restarted successfully")
+            # Restart monitor threads since old ones will have exited
+            threading.Thread(target=self._monitor_process, daemon=True).start()
+            threading.Thread(target=self._monitor_health, daemon=True).start()
+        finally:
+            self._restarting = False
 
 class HttpSocksBridge:
     def __init__(self, local_port, socks_host, socks_port, log_fn=None):
@@ -232,8 +334,8 @@ class HttpSocksBridge:
             else:
                 relay.sendall(data)
                 self._pipe(client, relay)
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Bridge handler error: {e}")
         finally:
             try: client.close()
             except: pass
@@ -558,9 +660,22 @@ class App:
 
             self.root.after(0, lambda: self._set_status("Status: Connected", "connected"))
             self.root.after(0, self.progress.stop)
+
+            # Start UI health status updater
+            threading.Thread(target=self._health_status_updater, daemon=True).start()
         except Exception as e:
             self.log(f"✗ Error: {e}")
             self.root.after(0, self.stop)
+
+    def _health_status_updater(self):
+        while self.tun_mgr and self.tun_mgr._monitoring_active:
+            time.sleep(5)
+            if not self.tun_mgr or not self.tun_mgr._monitoring_active:
+                break
+            if self.tun_mgr._connection_healthy:
+                self.root.after(0, lambda: self._set_status("Status: Connected", "connected"))
+            else:
+                self.root.after(0, lambda: self._set_status("Status: Reconnecting...", "stopping"))
 
     def stop(self):
         self._set_status("Status: Stopping...", "stopping")

@@ -6,6 +6,7 @@ import java.io.OutputStream
 import java.net.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 class ProxyServer {
@@ -80,7 +81,7 @@ class ProxyServer {
                     Thread.sleep(30000) // Every 30 seconds
                     val now = System.currentTimeMillis()
                     udpRelays.entries.removeIf { (key, relay) ->
-                        if (now - relay.lastActivity > 60000) { // 60 second timeout
+                        if (now - relay.lastActivity > 300000) { // 5 minute idle timeout
                             relay.close()
                             Log.d("ProxyServer", "Cleaned up stale UDP relay: $key")
                             true
@@ -211,33 +212,43 @@ class ProxyServer {
             output.write(response)
             output.flush()
 
-            val latch = CountDownLatch(2)
+            val lastActivity = AtomicLong(System.currentTimeMillis())
 
-            // Client -> Target
-            thread(isDaemon = true, name = "Proxy-C2T-$clientId") {
+            val c2t = thread(isDaemon = true, name = "Proxy-C2T-$clientId") {
                 try {
-                    pipeOptimized(input, targetSocket.getOutputStream(), clientId, "C->T")
+                    pipeOptimized(input, targetSocket.getOutputStream(), clientId, "C->T", lastActivity)
                 } catch (e: Exception) {
                     Log.d("ProxyServer", "[$clientId] C->T pipe closed: ${e.message}")
                 } finally {
-                    latch.countDown()
                     try { targetSocket.shutdownOutput() } catch (e: Exception) {}
                 }
             }
 
-            // Target -> Client
-            thread(isDaemon = true, name = "Proxy-T2C-$clientId") {
+            val t2c = thread(isDaemon = true, name = "Proxy-T2C-$clientId") {
                 try {
-                    pipeOptimized(targetSocket.getInputStream(), output, clientId, "T->C")
+                    pipeOptimized(targetSocket.getInputStream(), output, clientId, "T->C", lastActivity)
                 } catch (e: Exception) {
                     Log.d("ProxyServer", "[$clientId] T->C pipe closed: ${e.message}")
                 } finally {
-                    latch.countDown()
                     try { client.shutdownOutput() } catch (e: Exception) {}
                 }
             }
 
-            latch.await(180, TimeUnit.SECONDS)
+            // Wait for pipes to complete, but kill idle connections
+            val idleTimeoutMs = 300_000L // 5 minutes idle = close
+            val checkIntervalMs = 30_000L // Check every 30 seconds
+            while (c2t.isAlive || t2c.isAlive) {
+                // Wait for a thread to die or for check interval to pass
+                if (c2t.isAlive) c2t.join(checkIntervalMs)
+                // Check for idle timeout on active connections
+                val idleTime = System.currentTimeMillis() - lastActivity.get()
+                if (idleTime > idleTimeoutMs) {
+                    Log.d("ProxyServer", "[$clientId] Connection idle for ${idleTime / 1000}s, closing")
+                    try { targetSocket.close() } catch (e: Exception) {}
+                    try { client.shutdownOutput() } catch (e: Exception) {}
+                    break
+                }
+            }
 
         } catch (e: Exception) {
             Log.e("ProxyServer", "[$clientId] TCP Connection failed: ${e.message}")
@@ -308,7 +319,7 @@ class ProxyServer {
         }
     }
 
-    private fun pipeOptimized(ins: InputStream, out: OutputStream, clientId: String = "", direction: String = "") {
+    private fun pipeOptimized(ins: InputStream, out: OutputStream, clientId: String = "", direction: String = "", lastActivity: AtomicLong? = null) {
         val buffer = ByteArray(32768)
         var totalBytes = 0
         try {
@@ -317,12 +328,15 @@ class ProxyServer {
                 out.write(buffer, 0, len)
                 out.flush()
                 totalBytes += len
+                lastActivity?.set(System.currentTimeMillis())
             }
             if (direction.isNotEmpty() && totalBytes > 0) {
                 Log.d("ProxyServer", "[$clientId] $direction transferred ${totalBytes / 1024}KB")
             }
         } catch (e: Exception) {
-            // Normal closure
+            if (direction.isNotEmpty()) {
+                Log.d("ProxyServer", "[$clientId] $direction pipe closed: ${e.message}")
+            }
         }
     }
 
@@ -344,7 +358,7 @@ class ProxyServer {
 
         fun start() {
             thread(isDaemon = true, name = "UDP-Main-$clientId") {
-                val buffer = ByteArray(4096) // Large enough for any Roblox packet
+                val buffer = ByteArray(32768)
                 while (isRunning) {
                     try {
                         val packet = DatagramPacket(buffer, buffer.size)
@@ -404,7 +418,7 @@ class ProxyServer {
 
         private fun startResponseListener(socket: DatagramSocket, host: String, port: Int, clientAddr: InetAddress, clientPort: Int) {
             thread(isDaemon = true, name = "UDP-Resp-$port") {
-                val buffer = ByteArray(4096)
+                val buffer = ByteArray(32768)
                 try {
                     while (isRunning) {
                         val packet = DatagramPacket(buffer, buffer.size)
