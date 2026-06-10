@@ -806,11 +806,21 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
         }
     }
 
-    private fun syncServiceStates() {
-        // 1. Sync VPN Client state (Static variable check)
-        isClientRunning.value = MyVpnServiceTun2Socks.isServiceRunning
+    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        @Suppress("DEPRECATION")
+        for (service in manager.getRunningServices(Integer.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) {
+                return true
+            }
+        }
+        return false
+    }
 
-        // 2. Sync Host state with Permission Check
+    private fun syncServiceStates() {
+        isClientRunning.value = isServiceRunning(MyVpnServiceTun2Socks::class.java)
+        isHostRunning.value = isServiceRunning(HostService::class.java)
+
         val fineLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
         val nearbyDevices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES)
@@ -825,8 +835,9 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                         isHostRunning.value = true
                         updateGroupInfo(group)
                     } else {
-                        // Only set false if we're sure no group exists
-                        if (isHostRunning.value) isHostRunning.value = false
+                        if (!isServiceRunning(HostService::class.java)) {
+                            isHostRunning.value = false
+                        }
                     }
                 }
                 manager.requestConnectionInfo(channel, this)

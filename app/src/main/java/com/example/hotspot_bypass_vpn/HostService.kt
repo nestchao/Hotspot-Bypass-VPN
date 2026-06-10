@@ -35,15 +35,30 @@ class HostService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+
         if (intent?.action == "STOP") {
             isServiceRunning = false
+            prefs.edit().putBoolean("host_is_running_flag", false).apply()
             stopGroupAndService()
             return START_NOT_STICKY
         }
-        isServiceRunning = true
 
-        // Get the band preference from MainActivity
-        preferredBand = intent?.getIntExtra("WIFI_BAND", 1) ?: 1
+        if (isServiceRunning) {
+            startForeground(2, createNotification("Host is active"))
+            acquireLocks()
+            return START_STICKY
+        }
+
+        isServiceRunning = true
+        prefs.edit().putBoolean("host_is_running_flag", true).apply()
+
+        if (intent != null) {
+            preferredBand = intent.getIntExtra("WIFI_BAND", 1)
+            prefs.edit().putInt("last_wifi_band", preferredBand).apply()
+        } else {
+            preferredBand = prefs.getInt("last_wifi_band", 1)
+        }
 
         startForeground(2, createNotification("Host is active with custom password"))
         acquireLocks()
@@ -117,13 +132,25 @@ class HostService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.d("HostService", "App swiped — scheduling restart...")
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        val savedBand = prefs.getInt("last_wifi_band", preferredBand)
+
         val restartIntent = Intent(applicationContext, HostService::class.java).apply {
-            putExtra("WIFI_BAND", preferredBand)
+            putExtra("WIFI_BAND", savedBand)
         }
-        val pendingIntent = PendingIntent.getService(
-            applicationContext, 1, restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
+
+        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(
+                applicationContext, 1, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getService(
+                applicationContext, 1, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerTime = SystemClock.elapsedRealtime() + 1000L
 
@@ -219,6 +246,8 @@ class HostService : Service() {
     }
 
     override fun onDestroy() {
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("host_is_running_flag", false).apply()
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
         isServiceRunning = false

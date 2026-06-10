@@ -43,21 +43,35 @@ class MyVpnServiceTun2Socks : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+
         if (intent?.action == ACTION_STOP) {
-            isServiceRunning = false // SET FALSE
+            isServiceRunning = false
+            prefs.edit().putBoolean("vpn_is_running_flag", false).apply()
             DebugUtils.log("Stop Action Received via Intent")
             shutdownService()
             return START_NOT_STICKY
         }
-        isServiceRunning = true // SET TRUE
+        isServiceRunning = true
+        prefs.edit().putBoolean("vpn_is_running_flag", true).apply()
 
         if (isRunning) {
             DebugUtils.log("Service already running - resetting connections")
             resetConnections()
         }
 
-        proxyIp = intent?.getStringExtra("PROXY_IP") ?: "192.168.49.1"
-        proxyPort = intent?.getIntExtra("PROXY_PORT", 8080) ?: 8080
+        if (intent != null) {
+            proxyIp = intent.getStringExtra("PROXY_IP") ?: "192.168.49.1"
+            proxyPort = intent.getIntExtra("PROXY_PORT", 8080)
+            prefs.edit()
+                .putString("last_proxy_ip", proxyIp)
+                .putInt("last_proxy_port", proxyPort)
+                .apply()
+        } else {
+            proxyIp = prefs.getString("last_proxy_ip", "192.168.49.1") ?: "192.168.49.1"
+            proxyPort = prefs.getInt("last_proxy_port", 8080)
+            DebugUtils.log("Service restarted by system. Restored config: $proxyIp:$proxyPort")
+        }
 
         startForegroundNotification()
 
@@ -227,14 +241,27 @@ class MyVpnServiceTun2Socks : VpnService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         DebugUtils.log("App swiped — scheduling VPN restart...")
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        val savedIp = prefs.getString("last_proxy_ip", proxyIp) ?: proxyIp
+        val savedPort = prefs.getInt("last_proxy_port", proxyPort)
+
         val restartIntent = Intent(applicationContext, MyVpnServiceTun2Socks::class.java).apply {
-            putExtra("PROXY_IP", proxyIp)
-            putExtra("PROXY_PORT", proxyPort)
+            putExtra("PROXY_IP", savedIp)
+            putExtra("PROXY_PORT", savedPort)
         }
-        val pendingIntent = PendingIntent.getService(
-            applicationContext, 2, restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
+
+        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(
+                applicationContext, 2, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getService(
+                applicationContext, 2, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerTime = SystemClock.elapsedRealtime() + 1000L
 
@@ -248,14 +275,13 @@ class MyVpnServiceTun2Socks : VpnService() {
 
     override fun onDestroy() {
         DebugUtils.log("CRITICAL: Executing Stop Sequence...")
-        isServiceRunning = false // SET FALSE
+        isServiceRunning = false
+        val prefs = getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("vpn_is_running_flag", false).apply()
 
-        // Release locks
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
 
-        // 1. FORCIBLY close the VPN Interface first
-        // This tells the Android OS to immediately remove the VPN routes
         try {
             vpnInterface?.close()
             vpnInterface = null
@@ -264,7 +290,6 @@ class MyVpnServiceTun2Socks : VpnService() {
             DebugUtils.error("Error closing interface", e)
         }
 
-        // 2. Stop the tun2socks Engine
         try {
             Engine.stop()
             DebugUtils.log("✓ tun2socks engine stopped")
@@ -272,27 +297,13 @@ class MyVpnServiceTun2Socks : VpnService() {
             DebugUtils.error("Error stopping engine", e)
         }
 
-        // 3. Clean up notifications
         stopForeground(true)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(1)
 
         DebugUtils.log("VPN Service fully destroyed")
 
-        // 4. Final safety: Kill the process if it's stuck
-        // (Optional: Only use if the above doesn't work)
-        // android.os.Process.killProcess(android.os.Process.myPid())
-
         super.onDestroy()
-
-        thread {
-            Thread.sleep(1000)
-            if (!isRunning) {
-                // If the app is only used for VPN, you can kill the process
-                // to ensure the SOCKS engine is dead.
-                // android.os.Process.killProcess(android.os.Process.myPid())
-            }
-        }
     }
 
 
