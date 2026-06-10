@@ -59,7 +59,7 @@ class ProxyServer {
                             totalConnections.incrementAndGet()
                             client.tcpNoDelay = true
                             client.keepAlive = true
-                            client.soTimeout = 120000
+                            client.soTimeout = 0
 
                             clientPool?.execute {
                                 handleClient(client)
@@ -78,7 +78,7 @@ class ProxyServer {
         thread(name = "UDP-Cleanup", isDaemon = true) {
             while (isRunning) {
                 try {
-                    Thread.sleep(30000) // Every 30 seconds
+                    Thread.sleep(120000) // Every 2 minutes
                     val now = System.currentTimeMillis()
                     udpRelays.entries.removeIf { (key, relay) ->
                         if (now - relay.lastActivity > 300000) { // 5 minute idle timeout
@@ -199,7 +199,7 @@ class ProxyServer {
         clientId: String
     ) {
         val targetSocket = Socket()
-        targetSocket.soTimeout = 30000
+        targetSocket.soTimeout = 300000
         targetSocket.tcpNoDelay = true
         targetSocket.keepAlive = true
 
@@ -235,8 +235,8 @@ class ProxyServer {
             }
 
             // Wait for pipes to complete, but kill idle connections
-            val idleTimeoutMs = 300_000L // 5 minutes idle = close
-            val checkIntervalMs = 30_000L // Check every 30 seconds
+            val idleTimeoutMs = 600_000L // 10 minutes idle = close
+            val checkIntervalMs = 60_000L // Check every 60 seconds
             while (c2t.isAlive || t2c.isAlive) {
                 // Wait for a thread to die or for check interval to pass
                 if (c2t.isAlive) c2t.join(checkIntervalMs)
@@ -320,7 +320,7 @@ class ProxyServer {
     }
 
     private fun pipeOptimized(ins: InputStream, out: OutputStream, clientId: String = "", direction: String = "", lastActivity: AtomicLong? = null) {
-        val buffer = ByteArray(32768)
+        val buffer = ByteArray(65536)
         var totalBytes = 0
         try {
             var len: Int
@@ -399,7 +399,7 @@ class ProxyServer {
                         val targetKey = "$targetHost:$targetPort"
                         val socketToTarget = targetSockets.getOrPut(targetKey) {
                             val s = DatagramSocket()
-                            s.soTimeout = 10000
+                            s.soTimeout = 30000
                             // Start a listener for responses FROM this target
                             startResponseListener(s, targetHost, targetPort, packet.address, packet.port)
                             s

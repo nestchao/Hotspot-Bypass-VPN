@@ -13,3 +13,24 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Laptop proxy
+laptop_proxy/logs/
+laptop_proxy/venv/
+laptop_proxy/__pycache__/
+laptop_proxy/.pytest_cache/
+laptop_proxy/*.txt
+laptop_proxy/*.spec
+laptop_proxy/file_version_info.txt
+
+# Log files
+*.log
+
+# Misc generated metadata
+/.idea/markdown.xml
+
+# Generated connection summary
+host_client_connection_summary.txt
+
+# Stale project structure reference (manually maintained, always out of date)
+structure.txt

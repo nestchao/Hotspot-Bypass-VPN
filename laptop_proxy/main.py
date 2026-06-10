@@ -116,9 +116,11 @@ class TunManager:
             "-loglevel", "warning"
         ]
 
-        # Hide window on Windows
+        # Hide window on Windows, capture output
         cflags = 0x08000000 if IS_WINDOWS else 0
-        self.process = subprocess.Popen(cmd, cwd=BIN_DIR, creationflags=cflags)
+        self.process = subprocess.Popen(cmd, cwd=BIN_DIR, creationflags=cflags,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self._read_tun2socks_output()
 
         self.log("Waiting for network adapter...")
         adapter_found = False
@@ -168,6 +170,24 @@ class TunManager:
             
         subprocess.run(["netsh", "interface", "set", "interface", "LaptopProxyVPN", "disable"], capture_output=True)
         self.log("VPN Stopped.")
+
+    def _read_tun2socks_output(self):
+        """Read and log tun2socks stdout/stderr in background threads."""
+        def _reader(stream, label):
+            try:
+                for line in iter(stream.readline, b''):
+                    if not line:
+                        break
+                    msg = line.decode('utf-8', errors='replace').strip()
+                    if msg:
+                        self.log(f"[tun2socks:{label}] {msg}")
+            except Exception:
+                pass
+
+        if self.process and self.process.stdout:
+            threading.Thread(target=_reader, args=(self.process.stdout, 'out'), daemon=True).start()
+        if self.process and self.process.stderr:
+            threading.Thread(target=_reader, args=(self.process.stderr, 'err'), daemon=True).start()
 
     def _monitor_process(self):
         while self._monitoring_active:
@@ -227,22 +247,26 @@ class TunManager:
 
             self._clean_routes()
 
-            t2s_exe = os.path.join(BIN_DIR, "tun2socks.exe")
-            cmd = [
-                t2s_exe,
-                "-device", "tun://LaptopProxyVPN",
-                "-proxy", f"socks5://{self.phone_ip}:{self.phone_port}",
-                "-loglevel", "warning"
-            ]
-            cflags = 0x08000000 if IS_WINDOWS else 0
-            try:
-                self.process = subprocess.Popen(cmd, cwd=BIN_DIR, creationflags=cflags)
-            except Exception as e:
-                self.log(f"Failed to restart tun2socks: {e}")
-                return
+        t2s_exe = os.path.join(BIN_DIR, "tun2socks.exe")
+        cmd = [
+            t2s_exe,
+            "-device", "tun://LaptopProxyVPN",
+            "-proxy", f"socks5://{self.phone_ip}:{self.phone_port}",
+            "-loglevel", "warning"
+        ]
+        cflags = 0x08000000 if IS_WINDOWS else 0
+        try:
+            self.process = subprocess.Popen(cmd, cwd=BIN_DIR, creationflags=cflags,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self._read_tun2socks_output()
+        except Exception as e:
+            self.log(f"Failed to start tun2socks: {e}")
+            self._set_status("Failed to start tun2socks", "error")
+            return
 
-            self.log("Waiting for adapter to recover...")
-            time.sleep(3)
+        # Wait for adapter to be ready
+        self.log("Waiting for network adapter...")
+        time.sleep(3)
 
             subprocess.run(["netsh", "interface", "ip", "set", "address", "name=LaptopProxyVPN", "static", "10.0.0.2", "255.255.255.0", "10.0.0.1"], capture_output=True)
             subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=LaptopProxyVPN", "static", "8.8.8.8"], capture_output=True)

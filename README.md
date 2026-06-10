@@ -1,75 +1,58 @@
-# Hotspot Bypass VPN 📱💻
+# Hotspot Bypass VPN
 
-A complete solution to bypass carrier hotspot data restrictions and share your internet connection (including VPN) from an Android device to other phones or laptops. 
+A complete solution to bypass carrier hotspot data restrictions and share your internet connection (including VPN) from an Android device to other phones or laptops. Designed for 100% compatibility with standard web traffic and high-performance gaming (Roblox, Discord, UDP traffic).
 
-This project is specifically designed to work with 100% compatibility, supporting both standard web traffic and **high-performance gaming** (e.g., Roblox, Discord, UDP traffic).
+## Key Features
 
----
+### Android Application
+- **Share Mode (Host)**: Creates a high-performance Wi-Fi Direct hotspot that bypasses carrier tethering limits by routing traffic through a local SOCKS5 proxy. Persistent background operation even when screen is locked or app is swiped away.
+- **Connect Mode (Client)**: Connects to a host phone and tunnels all system traffic through a VPN using tun2socks for robust, gaming-optimized packet handling.
 
-## 🌟 Key Features
+### Laptop Client (Python)
+- **Global VPN (TUN) mode**: Captures 100% of Windows traffic (required for games like Roblox)
+- **Automatic setup**: Downloads wintun and tun2socks binaries on first run
+- **Health monitoring**: Automatic proxy health checks with 2-fail restart logic
+- **Console Bridge (ICS)**: Share the VPN connection with consoles/Macs via Windows Mobile Hotspot
+- **Lightweight GUI**: Clean CustomTkinter interface
 
-### 📱 Android Application
-*   **Share Mode (Host)**: 
-    *   Creates a high-performance Wi-Fi Direct hotspot.
-    *   Bypasses carrier "Tethering" limits by routing traffic through a local proxy.
-    *   **Persistent**: Stays active in the background, even when the screen is locked or the app is swiped away.
-*   **Connect Mode (Client)**:
-    *   Connects to a "Host" phone and tunnels all system traffic through a VPN.
-    *   Uses `tun2socks` for robust, gaming-optimized packet handling.
+### Debug Tools (laptop_proxy/tools/)
+- **diagnostic.py**: Standalone TCP/UDP/DNS probe tool through the SOCKS5 proxy
+- **traffic_monitor.py**: Real-time connection logging via ADB logcat + TUN adapter stats + CSV output
+- **tests/**: Unit tests for proxy bridge, tun manager health, and routing
 
-### 💻 Laptop Client (Python)
-*   **Two Routing Modes**:
-    *   **Simple Proxy**: Best for browsers and light web use.
-    *   **Global VPN (TUN)**: Captures 100% of Windows traffic. Required for games like **Roblox**.
-*   **Automatic Setup**: Downloads necessary drivers (`wintun`, `tun2socks`) automatically.
-*   **Lightweight**: Runs in a Python virtual environment with a clean GUI.
+## How to Use
 
----
-
-## 🚀 How to Use
-
-### 1. Setup the Host (The phone with internet)
-1.  Open the Android app and go to the **Share (Host)** tab.
-2.  Choose your Wi-Fi Band (5GHz is recommended for gaming).
-3.  Click **START SERVICE**.
-4.  Grant "Battery Optimization" exemption when prompted (this ensures the service doesn't die).
-5.  Note the **SSID**, **Password**, **Proxy IP**, and **Port** shown in the info card.
+### 1. Setup the Host (Phone with internet)
+1. Open the Android app and go to the **Share (Host)** tab.
+2. Choose Wi-Fi Band (5GHz recommended for gaming).
+3. Click **START SERVICE**.
+4. Grant battery optimization exemption when prompted (keeps service alive).
+5. Note the SSID, Password, Proxy IP, and Port from the info card.
 
 ### 2. Connect another Phone (Client)
-1.  Connect your second phone to the Wi-Fi network created by the Host.
-2.  Open the app on the second phone and go to the **Connect (Client)** tab.
-3.  Enter the **Host IP** and **Port** from the Host phone.
-4.  Click **START VPN**.
+1. Connect the second phone to the host's Wi-Fi network.
+2. Open the app on the second phone and go to **Connect (Client)** tab.
+3. Enter the Host IP and Port from the host phone.
+4. Click **START VPN**.
 
 ### 3. Connect a Laptop
-1.  Connect your laptop to the Wi-Fi network created by the Host phone.
-2.  Navigate to the `laptop_proxy` folder on your laptop.
-3.  Run `setup_venv.bat` (first time only) to set up the environment.
-4.  Run the app: `venv\Scripts\python.exe main.py`.
-5.  Select **Global VPN** (for games) or **Simple Proxy**.
-6.  Enter the Phone IP and click **START**.
+1. Connect the laptop to the host phone's Wi-Fi network.
+2. Navigate to `laptop_proxy/` on the laptop.
+3. Run `setup_venv.bat` (first time only).
+4. Run: `venv\Scripts\python.exe main.py`
+5. Select **Global VPN**, enter the Phone IP, and click **START**.
 
----
+## Technical Details
 
-## 🛠 Technical Details
+- **Bypass method**: SOCKS5 proxy over Wi-Fi Direct hides tethering traffic from carriers
+- **MTU tuning**: Optimized for gaming (MTU 1350) to reduce packet fragmentation
+- **Persistence**: Android Foreground Service + WakeLock + AlarmManager restart logic
+- **Connection stability**: Client socket timeout set to infinite (0); idle connection cleaner at 10 minutes; server socket timeout at 5 minutes; pipe buffer at 64KB
 
-*   **Bypass Method**: Uses a SOCKS5 proxy over Wi-Fi Direct to hide tethering traffic from carriers.
-*   **MTU Tuning**: Optimized for gaming (MTU 1350) to reduce packet fragmentation over proxies.
-*   **Persistence**: Uses Android Foreground Services, WakeLocks, and AlarmManager restart logic for maximum uptime.
-
-## 📦 Installation / Building
+## Building
 
 ### Android App
-1.  Open the project in **Android Studio**.
-2.  Build the APK and install it on your devices.
+Open in Android Studio and build the APK.
 
-### Laptop App (Windows)
-#### For Developers:
-1.  Navigate to the `laptop_proxy` folder.
-2.  Run `build_exe.bat`.
-3.  The standalone `LaptopProxy.exe` will be generated in the `dist` folder.
-
-#### For Users:
-1.  Just run `LaptopProxy.exe` from the `dist` folder. 
-2.  **No Python installation required.**
-3.  The app will automatically request Administrator rights to set up the VPN tunnel.
+### Laptop App
+Navigate to `laptop_proxy/` and run `build_exe.bat`. The standalone `LaptopProxy.exe` will be generated in `dist/`. No Python installation required — the exe auto-requests Administrator rights for VPN tunnel setup.
