@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.net.wifi.WifiManager
 import android.os.*
@@ -52,13 +53,14 @@ class MyVpnServiceTun2Socks : VpnService() {
             shutdownService()
             return START_NOT_STICKY
         }
+
+        if (isServiceRunning) {
+            startForegroundNotification()
+            return START_STICKY
+        }
+
         isServiceRunning = true
         prefs.edit().putBoolean("vpn_is_running_flag", true).apply()
-
-        if (isRunning) {
-            DebugUtils.log("Service already running - resetting connections")
-            resetConnections()
-        }
 
         if (intent != null) {
             proxyIp = intent.getStringExtra("PROXY_IP") ?: "192.168.49.1"
@@ -225,7 +227,11 @@ class MyVpnServiceTun2Socks : VpnService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        startForeground(1, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1, notification)
+        }
     }
 
     private fun updateNotification(message: String) {
@@ -265,11 +271,51 @@ class MyVpnServiceTun2Socks : VpnService() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerTime = SystemClock.elapsedRealtime() + 1000L
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pendingIntent)
-        } else {
-            alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pendingIntent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+        } catch (e: SecurityException) {
+            DebugUtils.error("Exact alarm permission missing in VPN service, using inexact fallback", e)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
         }
+
         super.onTaskRemoved(rootIntent)
     }
 

@@ -22,6 +22,15 @@ class BootReceiver : BroadcastReceiver() {
                     context.startService(hostIntent)
                 }
             }
+
+            if (wasVpnRunning) {
+                val vpnIntent = Intent(context, MyVpnServiceTun2Socks::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(vpnIntent)
+                } else {
+                    context.startService(vpnIntent)
+                }
+            }
         }
     }
 }

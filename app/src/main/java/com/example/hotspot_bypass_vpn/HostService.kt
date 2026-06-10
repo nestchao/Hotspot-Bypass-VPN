@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pManager
@@ -44,8 +45,14 @@ class HostService : Service() {
             return START_NOT_STICKY
         }
 
+        val notification = createNotification("Host is active")
+
         if (isServiceRunning) {
-            startForeground(2, createNotification("Host is active"))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(2, notification)
+            }
             acquireLocks()
             return START_STICKY
         }
@@ -60,7 +67,11 @@ class HostService : Service() {
             preferredBand = prefs.getInt("last_wifi_band", 1)
         }
 
-        startForeground(2, createNotification("Host is active with custom password"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(2, notification)
+        }
         acquireLocks()
 
         if (proxyServer == null) {
