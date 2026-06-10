@@ -103,18 +103,22 @@ class HostService : Service() {
         // Use the Builder to set the specific password (Android 10+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
+                val prefs = getSharedPreferences("bypass_vpn_prefs", MODE_PRIVATE)
+                val ssid = prefs.getString("wifi_ssid", "DIRECT-HotspotBypass") ?: "DIRECT-HotspotBypass"
+                val password = prefs.getString("wifi_password", "87654321") ?: "87654321"
+
                 // 2437MHz = 2.4GHz Channel 6 | 5180MHz = 5GHz Channel 36
                 val frequency = if (preferredBand == 1) 2437 else 5180
 
                 val config = WifiP2pConfig.Builder()
-                    .setNetworkName("DIRECT-HotspotBypass")
-                    .setPassphrase("87654321") // <--- YOUR NEW PASSWORD
+                    .setNetworkName(ssid)
+                    .setPassphrase(password)
                     .setGroupOperatingFrequency(frequency)
                     .build()
 
                 p2pManager.createGroup(p2pChannel, config, object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
-                        updateNotification("✓ Sharing Active | Pass: 87654321")
+                        updateNotification("✓ Sharing Active | Pass: $password")
                     }
                     override fun onFailure(reason: Int) {
                         Log.e("HostService", "Config Group failed ($reason), trying legacy...")

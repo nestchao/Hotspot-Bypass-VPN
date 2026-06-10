@@ -32,6 +32,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
@@ -40,6 +42,8 @@ import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import kotlin.concurrent.thread
 import androidx.compose.foundation.Image
@@ -117,6 +121,7 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
     private var clientPort = mutableStateOf("8080")
     private var selectedBand = mutableIntStateOf(1)
     private var selectedTab = mutableIntStateOf(0)
+    private var showSettings = mutableStateOf(false)
 
     // --- CRITICAL STATES ---
     private var isHostRunning = mutableStateOf(false)
@@ -158,29 +163,52 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
     fun MainScreen() {
         Scaffold(
             topBar = {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(
-                                painter = painterResource(id = R.drawable.app_logo),
-                                contentDescription = "App Logo",
-                                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(4.dp))
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text("BYPASS VPN", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                                Text("CONNECTED", fontSize = 8.sp, color = MaterialTheme.colorScheme.primary)
+                if (showSettings.value) {
+                    CenterAlignedTopAppBar(
+                        title = { Text("Settings", fontWeight = FontWeight.Black, fontSize = 18.sp) },
+                        navigationIcon = {
+                            IconButton(onClick = { showSettings.value = false }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                             }
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        titleContentColor = MaterialTheme.colorScheme.primary
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            titleContentColor = MaterialTheme.colorScheme.primary
+                        )
                     )
-                )
+                } else {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.app_logo),
+                                    contentDescription = "App Logo",
+                                    modifier = Modifier.size(32.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text("BYPASS VPN", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                    Text("CONNECTED", fontSize = 8.sp, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { showSettings.value = true }) {
+                                Icon(Icons.Default.Settings, contentDescription = "Settings")
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            titleContentColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
+                if (showSettings.value) {
+                    SettingsScreen()
+                } else {
                 TabRow(
                     selectedTabIndex = selectedTab.intValue,
                     containerColor = MaterialTheme.colorScheme.background,
@@ -253,6 +281,86 @@ class MainActivity : ComponentActivity(), WifiP2pManager.ConnectionInfoListener 
                     Spacer(modifier = Modifier.height(24.dp))
 
                     DebugLogSection()
+                }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun SettingsScreen() {
+        val prefs = remember { getSharedPreferences("bypass_vpn_prefs", Context.MODE_PRIVATE) }
+        var ssid by remember { mutableStateOf(prefs.getString("wifi_ssid", "DIRECT-HotspotBypass") ?: "DIRECT-HotspotBypass") }
+        var password by remember { mutableStateOf(prefs.getString("wifi_password", "87654321") ?: "87654321") }
+        var passwordVisible by remember { mutableStateOf(false) }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Wi-Fi Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = ssid,
+                    onValueChange = { ssid = it },
+                    label = { Text("SSID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Wifi, null) },
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        prefs.edit()
+                            .putString("wifi_ssid", ssid)
+                            .putString("wifi_password", password)
+                            .apply()
+                        if (isHostRunning.value) {
+                            handleStopHost()
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                handleStartHost()
+                            }, 2000)
+                        }
+                        showSettings.value = false
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.background
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(Icons.Default.Save, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("SAVE", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
                 }
             }
         }
