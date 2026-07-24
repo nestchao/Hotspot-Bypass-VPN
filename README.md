@@ -1,6 +1,20 @@
 # Hotspot Bypass VPN
 
-A complete solution to bypass carrier hotspot data restrictions and share your internet connection (including VPN) from an Android device to other phones or laptops. Designed for 100% compatibility with standard web traffic and high-performance gaming (Roblox, Discord, UDP traffic).
+**A complete solution to bypass carrier hotspot data restrictions** and share your internet connection (including VPN) from an Android device to other phones or laptops. Designed for 100% compatibility with standard web traffic and high-performance gaming (Roblox, Discord, UDP traffic).
+
+---
+
+## 🔗 Official Website
+
+> **[https://nestchao.github.io/Hotspot-Bypass-VPN-Unlimited-Hotspot/](https://nestchao.github.io/Hotspot-Bypass-VPN-Unlimited-Hotspot/)**
+
+Visit our website for:
+- 📥 Latest APK downloads
+- 💻 Laptop client releases
+- 📖 Full documentation and guides
+- 🐛 Issue tracking and support
+
+---
 
 ## Key Features
 
@@ -19,6 +33,8 @@ A complete solution to bypass carrier hotspot data restrictions and share your i
 - **diagnostic.py**: Standalone TCP/UDP/DNS probe tool through the SOCKS5 proxy
 - **traffic_monitor.py**: Real-time connection logging via ADB logcat + TUN adapter stats + CSV output
 - **tests/**: Unit tests for proxy bridge, tun manager health, and routing
+
+---
 
 ## How to Use
 
@@ -42,12 +58,18 @@ A complete solution to bypass carrier hotspot data restrictions and share your i
 4. Run: `venv\Scripts\python.exe main.py`
 5. Select **Global VPN**, enter the Phone IP, and click **START**.
 
+---
+
 ## Technical Details
 
-- **Bypass method**: SOCKS5 proxy over Wi-Fi Direct hides tethering traffic from carriers
-- **MTU tuning**: Optimized for gaming (MTU 1350) to reduce packet fragmentation
-- **Persistence**: Android Foreground Service + WakeLock + AlarmManager restart logic
-- **Connection stability**: Client socket timeout set to infinite (0); idle connection cleaner at 10 minutes; server socket timeout at 5 minutes; pipe buffer at 64KB
+| Aspect | Implementation |
+|--------|----------------|
+| **Bypass method** | SOCKS5 proxy over Wi-Fi Direct hides tethering traffic from carriers |
+| **MTU tuning** | Optimized for gaming (MTU 1350) to reduce packet fragmentation |
+| **Persistence** | Android Foreground Service + WakeLock + AlarmManager restart logic |
+| **Connection stability** | Client socket timeout set to infinite (0); idle connection cleaner at 10 minutes; server socket timeout at 5 minutes; pipe buffer at 64KB |
+
+---
 
 ## Building
 
@@ -56,3 +78,13 @@ Open in Android Studio and build the APK.
 
 ### Laptop App
 Navigate to `laptop_proxy/` and run `build_exe.bat`. The standalone `LaptopProxy.exe` will be generated in `dist/`. No Python installation required — the exe auto-requests Administrator rights for VPN tunnel setup.
+
+---
+
+## 📱 Download
+
+**[Get the latest release →](https://nestchao.github.io/Hotspot-Bypass-VPN-Unlimited-Hotspot/)**
+
+---
+
+*For support, issues, or contributions, please visit our [GitHub repository](https://github.com/nestchao/Hotspot-Bypass-VPN-Unlimited-Hotspot).*
