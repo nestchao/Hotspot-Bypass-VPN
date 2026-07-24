@@ -1,0 +1,1 @@
+import{_ as e,o,c as r,a1 as i}from"./chunks/framework.tMR08e0o.js";const u=JSON.parse('{"title":"Features","description":"","frontmatter":{},"headers":[],"relativePath":"features.md","filePath":"features.md"}'),n={name:"features.md"};function a(s,t,l,d,c,h){return o(),r("div",null,[...t[0]||(t[0]=[i("",22)])])}const g=e(n,[["render",a]]);export{u as __pageData,g as default};

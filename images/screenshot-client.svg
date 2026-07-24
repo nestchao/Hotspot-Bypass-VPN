@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 720" font-family="Roboto, sans-serif">
+  <defs>
+    <linearGradient id="phone-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#120024"/>
+    </linearGradient>
+    <linearGradient id="btn-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#03DAC5"/>
+      <stop offset="100%" stop-color="#009688"/>
+    </linearGradient>
+    <linearGradient id="card-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a1a3e"/>
+      <stop offset="100%" stop-color="#1e1030"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Phone frame -->
+  <rect x="10" y="0" width="340" height="720" rx="30" fill="#111" stroke="#333" stroke-width="2"/>
+  <rect x="25" y="15" width="310" height="690" rx="20" fill="url(#phone-bg)"/>
+  <!-- Status bar -->
+  <rect x="25" y="15" width="310" height="30" rx="20" fill="#0d001a"/>
+  <text x="50" y="35" fill="#aaa" font-size="11">10:25</text>
+  <text x="290" y="35" fill="#aaa" font-size="11">📶 🔋</text>
+
+  <!-- App bar -->
+  <rect x="25" y="45" width="310" height="44" fill="#0d001a"/>
+  <text x="180" y="72" fill="#03DAC5" font-size="14" font-weight="bold" text-anchor="middle">BYPASS VPN</text>
+  <text x="180" y="85" fill="#666" font-size="9" text-anchor="middle">HOTSPOT BYPASS</text>
+
+  <!-- Tabs -->
+  <rect x="25" y="89" width="155" height="36" rx="4" fill="transparent"/>
+  <text x="102" y="112" fill="#888" font-size="13" font-weight="bold" text-anchor="middle">HOST</text>
+  <rect x="180" y="89" width="155" height="36" rx="4" fill="#03DAC5"/>
+  <text x="257" y="112" fill="#120024" font-size="13" font-weight="bold" text-anchor="middle">CLIENT</text>
+
+  <!-- VPN Status Card -->
+  <rect x="35" y="140" width="290" height="130" rx="10" fill="url(#card-grad)" stroke="#4CAF50" stroke-width="1" stroke-opacity="0.3"/>
+  <text x="180" y="165" fill="#4CAF50" font-size="11" font-weight="bold" text-anchor="middle">VPN STATUS</text>
+
+  <circle cx="70" cy="190" r="20" fill="#4CAF50" opacity="0.15"/>
+  <circle cx="70" cy="190" r="10" fill="#4CAF50" opacity="0.4"/>
+  <circle cx="70" cy="190" r="5" fill="#4CAF50"/>
+
+  <text x="100" y="195" fill="#4CAF50" font-size="16" font-weight="bold">Connected</text>
+  <text x="100" y="215" fill="#888" font-size="10">Traffic routed via Host</text>
+
+  <text x="60" y="245" fill="#888" font-size="10">Host: 192.168.49.1:8080</text>
+  <text x="200" y="245" fill="#888" font-size="10">Ping: 32ms</text>
+  <text x="60" y="260" fill="#888" font-size="10">TX: 1.2 MB</text>
+  <text x="200" y="260" fill="#888" font-size="10">RX: 4.8 MB</text>
+
+  <!-- Disconnect button -->
+  <rect x="50" y="290" width="260" height="44" rx="22" fill="#E53935"/>
+  <text x="180" y="318" fill="#fff" font-size="13" font-weight="bold" text-anchor="middle">DISCONNECT</text>
+
+  <!-- Reconnect button -->
+  <rect x="50" y="345" width="260" height="36" rx="18" fill="#333" stroke="#555" stroke-width="1"/>
+  <text x="180" y="368" fill="#ccc" font-size="12" text-anchor="middle">🔄 Reconnect VPN</text>
+
+  <!-- Private DNS Warning -->
+  <rect x="35" y="400" width="290" height="44" rx="8" fill="#3e2723" stroke="#FF9800" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="50" y="420" fill="#FF9800" font-size="11" font-weight="bold">⚠️ Private DNS Detected</text>
+  <text x="50" y="436" fill="#aaa" font-size="9">Set to Off or Automatic in Settings</text>
+
+  <!-- Notification -->
+  <rect x="35" y="460" width="290" height="36" rx="6" fill="#263238"/>
+  <text x="50" y="478" fill="#ccc" font-size="10">🔒 VPN connected</text>
+  <text x="50" y="490" fill="#888" font-size="9">Hotspot Bypass VPN</text>
+
+  <!-- Debug log expanded -->
+  <rect x="35" y="510" width="290" height="30" rx="6" fill="#1a1a2e" stroke="#333" stroke-width="1"/>
+  <text x="50" y="529" fill="#03DAC5" font-size="10">▼ Debug Log</text>
+  <rect x="35" y="540" width="290" height="80" rx="0" fill="#0d001a"/>
+  <text x="45" y="558" fill="#888" font-size="8" font-family="monospace">[INFO] Connecting to 192.168.49.1:8080</text>
+  <text x="45" y="572" fill="#888" font-size="8" font-family="monospace">[INFO] SOCKS5 handshake OK</text>
+  <text x="45" y="586" fill="#888" font-size="8" font-family="monospace">[INFO] VPN tunnel established</text>
+  <text x="45" y="600" fill="#888" font-size="8" font-family="monospace">[INFO] UDP relay active</text>
+
+  <!-- Bottom nav -->
+  <rect x="25" y="650" width="310" height="55" rx="0" fill="#0d001a"/>
+  <text x="70" y="685" fill="#666" font-size="18" text-anchor="middle">🏠</text>
+  <text x="180" y="685" fill="#03DAC5" font-size="18" text-anchor="middle">📊</text>
+  <text x="290" y="685" fill="#666" font-size="18" text-anchor="middle">⚙️</text>
+
+  <!-- Home indicator -->
+  <rect x="140" y="700" width="80" height="4" rx="2" fill="#333"/>
+</svg>

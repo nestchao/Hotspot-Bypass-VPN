@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 720" font-family="Roboto, sans-serif">
+  <defs>
+    <linearGradient id="phone-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#120024"/>
+    </linearGradient>
+    <linearGradient id="btn-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#03DAC5"/>
+      <stop offset="100%" stop-color="#009688"/>
+    </linearGradient>
+    <linearGradient id="card-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a1a3e"/>
+      <stop offset="100%" stop-color="#1e1030"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Phone frame -->
+  <rect x="10" y="0" width="340" height="720" rx="30" fill="#111" stroke="#333" stroke-width="2"/>
+  <rect x="25" y="15" width="310" height="690" rx="20" fill="url(#phone-bg)"/>
+  <!-- Status bar -->
+  <rect x="25" y="15" width="310" height="30" rx="20" fill="#0d001a"/>
+  <text x="50" y="35" fill="#aaa" font-size="11">10:25</text>
+  <text x="290" y="35" fill="#aaa" font-size="11">📶 🔋</text>
+
+  <!-- App bar -->
+  <rect x="25" y="45" width="310" height="44" fill="#0d001a"/>
+  <text x="180" y="72" fill="#03DAC5" font-size="14" font-weight="bold" text-anchor="middle">BYPASS VPN</text>
+  <text x="180" y="85" fill="#666" font-size="9" text-anchor="middle">HOTSPOT BYPASS</text>
+
+  <!-- Tabs -->
+  <rect x="25" y="89" width="155" height="36" rx="4" fill="#03DAC5"/>
+  <text x="102" y="112" fill="#120024" font-size="13" font-weight="bold" text-anchor="middle">HOST</text>
+  <rect x="180" y="89" width="155" height="36" rx="4" fill="transparent"/>
+  <text x="257" y="112" fill="#888" font-size="13" text-anchor="middle">CLIENT</text>
+
+  <!-- Wi-Fi Band selector -->
+  <rect x="35" y="135" width="290" height="44" rx="8" fill="url(#card-grad)"/>
+  <text x="50" y="158" fill="#ccc" font-size="11">Wi-Fi Band</text>
+  <rect x="200" y="140" width="55" height="28" rx="14" fill="#03DAC5"/>
+  <text x="215" y="158" fill="#120024" font-size="10" font-weight="bold">5GHz</text>
+  <rect x="260" y="140" width="55" height="28" rx="14" fill="#333"/>
+  <text x="275" y="158" fill="#888" font-size="10">2.4GHz</text>
+
+  <!-- Connection Info Card -->
+  <rect x="35" y="190" width="290" height="200" rx="10" fill="url(#card-grad)" stroke="#03DAC5" stroke-width="1" stroke-opacity="0.3"/>
+  <text x="180" y="212" fill="#03DAC5" font-size="11" font-weight="bold" text-anchor="middle">CONNECTION INFO</text>
+  <!-- SSID -->
+  <text x="50" y="238" fill="#888" font-size="10">SSID</text>
+  <text x="50" y="255" fill="#fff" font-size="12" font-family="monospace">DIRECT-HotspotBypass</text>
+  <rect x="295" y="240" width="20" height="20" rx="4" fill="#03DAC5" opacity="0.8"/>
+  <text x="305" y="254" fill="#120024" font-size="11" font-weight="bold">📋</text>
+  <!-- Password -->
+  <text x="50" y="280" fill="#888" font-size="10">Password</text>
+  <text x="50" y="297" fill="#fff" font-size="12" font-family="monospace">87654321</text>
+  <rect x="295" y="282" width="20" height="20" rx="4" fill="#03DAC5" opacity="0.8"/>
+  <text x="305" y="296" fill="#120024" font-size="11" font-weight="bold">📋</text>
+  <!-- Proxy IP -->
+  <text x="50" y="322" fill="#888" font-size="10">Proxy IP</text>
+  <text x="50" y="339" fill="#03DAC5" font-size="12" font-family="monospace">192.168.49.1</text>
+  <rect x="295" y="324" width="20" height="20" rx="4" fill="#03DAC5" opacity="0.8"/>
+  <text x="305" y="338" fill="#120024" font-size="11" font-weight="bold">📋</text>
+  <!-- Port -->
+  <text x="50" y="364" fill="#888" font-size="10">Port</text>
+  <text x="50" y="381" fill="#03DAC5" font-size="12" font-family="monospace">8080</text>
+  <rect x="295" y="366" width="20" height="20" rx="4" fill="#03DAC5" opacity="0.8"/>
+  <text x="305" y="380" fill="#120024" font-size="11" font-weight="bold">📋</text>
+
+  <!-- Status indicator -->
+  <circle cx="60" cy="418" r="5" fill="#4CAF50"/>
+  <text x="72" y="422" fill="#4CAF50" font-size="11">Host Active</text>
+
+  <!-- Stop Host button -->
+  <rect x="50" y="440" width="260" height="44" rx="22" fill="#E53935"/>
+  <text x="180" y="468" fill="#fff" font-size="13" font-weight="bold" text-anchor="middle">STOP HOST</text>
+
+  <!-- Notification banner -->
+  <rect x="35" y="500" width="290" height="36" rx="6" fill="#263238"/>
+  <text x="50" y="523" fill="#ccc" font-size="10">📢 Host service running</text>
+
+  <!-- Debug log collapsed -->
+  <rect x="35" y="550" width="290" height="30" rx="6" fill="#1a1a2e" stroke="#333" stroke-width="1"/>
+  <text x="50" y="569" fill="#888" font-size="10">▶ Debug Log</text>
+
+  <!-- Bottom nav -->
+  <rect x="25" y="650" width="310" height="55" rx="0" fill="#0d001a"/>
+  <text x="70" y="685" fill="#03DAC5" font-size="18" text-anchor="middle">🏠</text>
+  <text x="180" y="685" fill="#666" font-size="18" text-anchor="middle">📊</text>
+  <text x="290" y="685" fill="#666" font-size="18" text-anchor="middle">⚙️</text>
+
+  <!-- Home indicator -->
+  <rect x="140" y="700" width="80" height="4" rx="2" fill="#333"/>
+</svg>
